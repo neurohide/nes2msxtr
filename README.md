@@ -58,7 +58,7 @@ translation works and the full list of limits.
 ## What you need
 
 To build:
-- Python 3
+- Python 3 and `make`
 - [`z80asm`](https://www.nongnu.org/z80asm/)
 - [cc65](https://cc65.github.io/), only to assemble the bundled test ROMs
 
@@ -71,23 +71,51 @@ To play:
 - Or [openMSX](https://openmsx.org/) with the FS-A1GT system ROMs. `make run`
   starts it with a GFX9000, and with a RAM expansion when the game needs one.
 
-`make deps` (or `tools/deps.sh`) installs Python 3, z80asm, cc65 and openMSX
-with Homebrew on macOS or apt on Debian/Ubuntu. It then checks that openMSX can
-start an FS-A1GT with a GFX9000. The FS-A1GT system ROMs are copyrighted and
-not installed: copy your own dumps into `~/.openMSX/share/systemroms/`.
-`tools/deps.sh --check` only reports what is missing. The scripts use the
-openMSX app in `/Applications` if it is there, otherwise `openmsx` on the
-`PATH`; set `OPENMSX=/path/to/openmsx` to choose another.
+See [Installing dependencies](#installing-dependencies) for a script that
+installs all of this.
 
-On Windows, nes2msxtr runs in WSL (Windows Subsystem for Linux), since the
-build uses `make` and shell scripts. Run `tools\deps.cmd` (or
-`tools\deps.ps1`) from a Windows prompt: it installs WSL with Ubuntu if no
-Linux distribution is there yet (restart, finish the Ubuntu setup, and run it
-again), then runs `tools/deps.sh` inside WSL. `-Check` only reports, `-Distro`
-picks another WSL distribution. Put the FS-A1GT ROMs in
-`~/.openMSX/share/systemroms/` inside WSL, then build and play from a WSL
-shell, e.g. `wsl make ROM=mygame` in the project folder. openMSX opens its
-window through WSLg (Windows 11, or Windows 10 with a recent WSL).
+## Installing dependencies
+
+The scripts in `tools/` install the build tools and openMSX, then check that
+openMSX can start an FS-A1GT with a GFX9000.
+
+**macOS** (needs [Homebrew](https://brew.sh/)) **and Debian / Ubuntu** (apt,
+asks for `sudo`):
+
+```
+make deps                  # or: tools/deps.sh
+tools/deps.sh --check      # only report what is missing
+```
+
+On another Linux, `--check` lists what is missing; install it with your
+package manager.
+
+**Windows:** nes2msxtr runs in WSL (Windows Subsystem for Linux), since the
+build uses `make` and shell scripts. WSL needs Windows 10 version 2004 or
+later, or Windows 11. From a Command Prompt or PowerShell in the project
+folder:
+
+```
+tools\deps.cmd                    # or: powershell -File tools\deps.ps1
+tools\deps.cmd -Check             # only report what is missing
+tools\deps.cmd -Distro Debian     # use another WSL distribution
+```
+
+1. The first run installs WSL with Ubuntu (it asks for administrator rights).
+   Restart Windows if asked, finish the Ubuntu setup (user name and
+   password), then run `tools\deps.cmd` again.
+2. The second run installs the tools inside WSL with apt.
+3. Build and play from WSL, for example `wsl make ROM=mygame` in the project
+   folder. openMSX opens its window through WSLg.
+
+**System ROMs (all platforms):** the FS-A1GT system ROMs are copyrighted, so
+the scripts don't install them. Copy your own dumps into
+`~/.openMSX/share/systemroms/` (inside WSL on Windows). The script reports
+them missing until openMSX finds them.
+
+**Choosing openMSX:** `make run` and the test scripts use the openMSX app in
+`/Applications` if it is there, otherwise `openmsx` on the `PATH`. Set
+`OPENMSX=/path/to/openmsx` to use another.
 
 ## Layout
 
@@ -105,14 +133,16 @@ nes2msxtr/
 
 ## Quick start
 
-1. Copy your ROM into `sourcerom/`, for example `sourcerom/mygame.nes`.
-2. Build it:
+1. Install the dependencies (once): `make deps`, or `tools\deps.cmd` on
+   Windows. See [Installing dependencies](#installing-dependencies).
+2. Copy your ROM into `sourcerom/`, for example `sourcerom/mygame.nes`.
+3. Build it:
    ```
    make ROM=mygame
    ```
    This writes `build/mygame/mygame.rom` and `build/mygame/report.txt`. The
    report lists the mapper, RAM needed, code banks and translation warnings.
-3. Play it in openMSX:
+4. Play it in openMSX:
    ```
    make run ROM=mygame
    ```
@@ -208,6 +238,7 @@ make replay ROM=game REPLAY=build/game/crash-1.omr
 make test                 # translate the test ROMs and compare their RAM with
                           # a reference 6502 run, in openMSX
 make clean                # remove build/ (entries.txt included)
+make deps                 # install the build tools and openMSX (tools/deps.sh)
 ```
 
 ## How it works
