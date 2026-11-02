@@ -5,7 +5,10 @@
 # 2: Start every 4 s up to 40 s first, for games with an intro and menus);
 # NES2MSX_POKE="32=09,30=02" keeps NES RAM bytes at those values (hex).
 ROM="$1"; OUT="$2"; SECS="${3:-12}"
-OPENMSX="${OPENMSX:-/Applications/openMSX.app/Contents/MacOS/openmsx}"
+if [ -z "$OPENMSX" ]; then     # the macOS app, else openmsx on the PATH
+    OPENMSX=/Applications/openMSX.app/Contents/MacOS/openmsx
+    [ -x "$OPENMSX" ] || OPENMSX=openmsx
+fi
 HERE="$(cd "$(dirname "$0")" && pwd)"
 . "$HERE/ramext.sh"
 mkdir -p "$OUT"

@@ -18,6 +18,7 @@
 #                                    DISCOVER_PLAY=2 presses Start every 4 s up to
 #                                    40 s first, for games with an intro and menus)
 #   make test                        end-to-end check with the bundled test ROM
+#   make deps                        install the tools needed (tools/deps.sh)
 
 ROM ?= testrom/testrom.nes
 SOURCEROM ?= sourcerom
@@ -116,9 +117,13 @@ run: all
 replay:
 	OPENMSX=$(OPENMSX) tools/omsx/view.sh $(REPLAY:.omr=.rom) $(OUT) $(REPLAY)
 
-OPENMSX ?= /Applications/openMSX.app/Contents/MacOS/openmsx
+OPENMSX ?= $(firstword $(wildcard /Applications/openMSX.app/Contents/MacOS/openmsx) openmsx)
 
 clean:
 	rm -rf build
 
-.PHONY: all samples test test-testrom test-stacktest test-uxtest test-mmc3 test-ramext profile discover run replay clean
+# install python3, z80asm, cc65 and openMSX (Homebrew or apt), check the FS-A1GT ROMs
+deps:
+	tools/deps.sh
+
+.PHONY: all deps samples test test-testrom test-stacktest test-uxtest test-mmc3 test-ramext profile discover run replay clean

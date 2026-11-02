@@ -25,8 +25,6 @@ emulates the NES picture, sound and mapper on the MSX hardware.
 |---|---|---|
 | ![Super Mario Bros. on MSX turboR + GFX9000](docs/screenshots/supermariobros.png) | ![Contra on MSX turboR + GFX9000](docs/screenshots/contra.png) | ![Double Dragon II on MSX turboR + GFX9000](docs/screenshots/doubledragonii.png) |
 
-![Double Dragon II title screen](docs/screenshots/doubledragonii-title.png)
-
 *These screenshots are samples that show the result of the translation: the
 cartridges nes2msxtr built from the ROMs listed below, running in openMSX on
 a Panasonic FS-A1GT (R800) with a GFX9000.*
@@ -72,6 +70,24 @@ To play:
   from a RAM expansion cartridge, which the runtime finds at boot.
 - Or [openMSX](https://openmsx.org/) with the FS-A1GT system ROMs. `make run`
   starts it with a GFX9000, and with a RAM expansion when the game needs one.
+
+`make deps` (or `tools/deps.sh`) installs Python 3, z80asm, cc65 and openMSX
+with Homebrew on macOS or apt on Debian/Ubuntu. It then checks that openMSX can
+start an FS-A1GT with a GFX9000. The FS-A1GT system ROMs are copyrighted and
+not installed: copy your own dumps into `~/.openMSX/share/systemroms/`.
+`tools/deps.sh --check` only reports what is missing. The scripts use the
+openMSX app in `/Applications` if it is there, otherwise `openmsx` on the
+`PATH`; set `OPENMSX=/path/to/openmsx` to choose another.
+
+On Windows, nes2msxtr runs in WSL (Windows Subsystem for Linux), since the
+build uses `make` and shell scripts. Run `tools\deps.cmd` (or
+`tools\deps.ps1`) from a Windows prompt: it installs WSL with Ubuntu if no
+Linux distribution is there yet (restart, finish the Ubuntu setup, and run it
+again), then runs `tools/deps.sh` inside WSL. `-Check` only reports, `-Distro`
+picks another WSL distribution. Put the FS-A1GT ROMs in
+`~/.openMSX/share/systemroms/` inside WSL, then build and play from a WSL
+shell, e.g. `wsl make ROM=mygame` in the project folder. openMSX opens its
+window through WSLg (Windows 11, or Windows 10 with a recent WSL).
 
 ## Layout
 

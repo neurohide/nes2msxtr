@@ -3,7 +3,10 @@
 # (FS-A1GT + GFX9000) with crash recording; with a replay, plays it back
 # headless and reports where it stopped.
 ROM="$1"; OUT="$2"; REPLAY="$3"
-OPENMSX="${OPENMSX:-/Applications/openMSX.app/Contents/MacOS/openmsx}"
+if [ -z "$OPENMSX" ]; then     # the macOS app, else openmsx on the PATH
+    OPENMSX=/Applications/openMSX.app/Contents/MacOS/openmsx
+    [ -x "$OPENMSX" ] || OPENMSX=openmsx
+fi
 HERE="$(cd "$(dirname "$0")" && pwd)"
 . "$HERE/ramext.sh"
 # labels of the cartridge being run: the copy saved with a replay, if any

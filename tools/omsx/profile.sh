@@ -2,7 +2,10 @@
 # usage: profile.sh game.rom out_dir seconds  -- plays the cartridge in openMSX
 # (FS-A1GT + GFX9000) and records cross-bank calls in out_dir/profile_raw.txt.
 ROM="$1"; OUT="$2"; SECS="${3:-40}"
-OPENMSX="${OPENMSX:-/Applications/openMSX.app/Contents/MacOS/openmsx}"
+if [ -z "$OPENMSX" ]; then     # the macOS app, else openmsx on the PATH
+    OPENMSX=/Applications/openMSX.app/Contents/MacOS/openmsx
+    [ -x "$OPENMSX" ] || OPENMSX=openmsx
+fi
 HERE="$(cd "$(dirname "$0")" && pwd)"
 lbl() { grep "^$1:" "$OUT/game.lbl" | sed 's/.*\$/0x/'; }
 rm -f "$OUT/profile_raw.txt"
