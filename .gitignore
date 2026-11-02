@@ -1,0 +1,11 @@
+# Game ROMs are never part of this project: put your own dumps here.
+sourcerom/*.nes
+# Build output and caches
+build/
+tools/__pycache__/
+testrom/*.o
+.DS_Store
+# test ROMs are built from testrom/*.s by make
+testrom/*.nes
+testrom/*.lbl
+testrom/*.chr
