@@ -1,6 +1,7 @@
-"""Recursive-descent 6502 tracer for NROM, UxROM and MMC3 images.
+"""Recursive-descent 6502 tracer for NROM, UxROM, MMC1 and MMC3 images.
 
-Addresses: NROM code has plain 16-bit addresses. On UxROM and MMC3 the
+Addresses: NROM code has plain 16-bit addresses. On UxROM, MMC1 (PRG mode
+3, banked like UxROM) and MMC3 the
 fixed last 16K ($C000-$FFFF) keeps plain addresses too, and code in the
 switchable half is at the banked address (bank + 1) << 16 | addr (see
 Mem), so the same NES address traced in two banks is two different
@@ -16,6 +17,9 @@ targets of computed jumps that were only seen at run time):
   calls     JSR targets
   engines   dispatcher routines (pop return address, JMP (ind) through the
             inline .word table that follows each JSR to them)
+  inline    routines that pop their return address, read the zero-terminated
+            data that follows each JSR to them and JMP (ptr) past it
+  inline_cont  JSR site -> where such a call continues (after the data)
   tables    JSR-site -> [case addresses]
   pushed    return addresses (+ 1) pushed by hand with LDA #imm / PHA
   dispatch  site -> [targets] for computed jumps found by pattern:
@@ -86,6 +90,7 @@ class Program:
 
 
 _SLOT = 0x4000      # switchable slot size: 16K (UxROM) or 8K (MMC3); set by trace()
+WTAG = 0x100        # bank tag of code in PRG RAM: WTAG << 16 | address
 
 
 def canon(a):
@@ -112,15 +117,19 @@ def branch_target(a, arg):
 
 class Mem:
     """The PRG image as seen through NROM, UxROM (16K banks, the last one
-    fixed at $C000) or MMC3 (8K banks in two slots, the last 16K fixed).
-    kind: "nrom", "uxrom" or "mmc3"."""
+    fixed at $C000; MMC1 too) or MMC3 (8K banks in two slots, the last 16K
+    fixed). kind: "nrom", "uxrom", "mmc1" or "mmc3"."""
     def __init__(self, prg, kind):
         self.prg, self.kind = prg, kind
         self.ux = kind != "nrom"        # has a switchable half
         self.mmc3 = kind == "mmc3"
+        self.mmc1 = kind == "mmc1"
         self.unit = 0x2000 if self.mmc3 else 0x4000
         self.nslots = 2 if self.mmc3 else 1
         self.nbanks = len(prg) // self.unit
+        # code the game copies from PRG into PRG RAM and runs there:
+        # (RAM address, PRG address it came from, length)
+        self.wram_code = None
 
     def slot(self, t):
         """switchable slot of 16-bit address t, or None"""
@@ -131,6 +140,9 @@ class Mem:
         """address -> offset in prg, or None outside ROM / a plain
         switchable-half address (bank unknown)."""
         n = a & 0xFFFF
+        if a >> 16 == WTAG and self.wram_code:
+            dst, src, ln = self.wram_code
+            return self.off(src + n - dst) if dst <= n < dst + ln else None
         if n < 0x8000: return None
         if not self.ux: return (n - 0x8000) & (len(self.prg) - 1)
         if n >= 0xC000: return len(self.prg) - 0x10000 + n
@@ -144,6 +156,7 @@ class Mem:
     def at(self, site, t):
         """16-bit address t as code at site sees it, or None when it is in
         a switchable slot other than site's own."""
+        if self.wram_code and 0x6000 <= t < 0x8000: return WTAG << 16 | t
         sl = self.slot(t)
         if sl is None: return t
         return (site & ~0xFFFF) | t if site >> 16 and self.slot(site & 0xFFFF) == sl else None
@@ -176,9 +189,13 @@ def trace(prg, kind="nrom", extra=()):
     P = Program()
     P.mem = mem
     P.xbank, P.dbank = {}, {}
+    P.ramcode = {}      # NES RAM address -> the ROM code copied there
 
     def targets(site, t):
         """JSR/JMP operand t at site -> addresses to trace"""
+        if t < 0x2000:
+            v = P.ramcode.get(t & 0x7FF)
+            return [v] if v is not None else []
         v = mem.at(site, t)
         if v is not None: return [v] if inrom(v) else []
         return [mem.banked(t, b) for b in sorted(P.xbank.get(site) or ())]
@@ -194,9 +211,19 @@ def trace(prg, kind="nrom", extra=()):
         P.vectors["NMI"] = P.vectors["RESET"]  # fallback: same as RESET
 
     P.engines, P.tables = set(), {}
+    P.inline, P.inline_cont = set(), {}
+
+    def data_end(site):
+        """the address after the zero byte that ends the data after JSR site"""
+        for k in range(3, 259):
+            b = canon(site + k)
+            if not inrom(b): return None
+            if rd(b) == 0: return canon(b + 1)
+        return None
 
     def run(entries):
         code, labels, calls, warns = {}, set(), set(), []
+        P.inline_cont = {}
         soft = set()     # reached by falling through a skip's operand
         unoff = set()    # where an unofficial opcode may be decoded
         nofall = set()   # branches that are always taken
@@ -239,6 +266,11 @@ def trace(prg, kind="nrom", extra=()):
                 if mode == "rel" and prev == OPPOSITE[m]: nofall.add(a); break
                 prev = m if mode == "rel" else None
                 imm = arg if (mode == "imm" and m in ("LDA", "LDX", "LDY")) else None
+                if m == "JSR" and mem.at(a, arg) in P.inline:
+                    c = data_end(a)
+                    if c is not None:
+                        P.inline_cont[a] = c; labels.add(c); work.append(c)
+                    break
                 a = nxt(a, n)
                 if m == "JSR" and mem.at(a, arg) in P.engines: break   # inline table follows
         # found in either order: the BIT first, or the hidden instruction first
@@ -262,8 +294,29 @@ def trace(prg, kind="nrom", extra=()):
             a = nxt(a, n)
         return False
 
+    def is_inline(code, t):
+        """PLA / STA p / PLA / STA p+1 (in either order), then a JMP (p)"""
+        seq, a = [], t
+        for _ in range(4):
+            if a not in code: return False
+            seq.append(code[a]); a = nxt(a, code[a][0])
+        if [x[1:3] for x in seq] != [("PLA", "imp"), ("STA", "zp")] * 2 or abs(seq[1][3] - seq[3][3]) != 1:
+            return False
+        p = min(seq[1][3], seq[3][3])
+        seen, work = set(), [t]
+        while work and len(seen) < 64:
+            a = work.pop()
+            if a in seen or a not in code: continue
+            seen.add(a)
+            n, m, mode, arg = code[a]
+            if m == "JMP" and mode == "ind" and arg == p: return True
+            if mode == "rel": work.append(branch_target(a, arg))
+            if m == "JMP" and mode == "abs" and mem.at(a, arg) is not None: work.append(mem.at(a, arg))
+            if m not in ENDS_FLOW: work.append(nxt(a, n))
+        return False
+
     roots = [P.vectors["NMI"], P.vectors["RESET"]]
-    if mem.mmc3 and inrom(P.vectors["IRQ"]): roots.append(P.vectors["IRQ"])   # scanline IRQ
+    if (mem.mmc3 or mem.mmc1) and inrom(P.vectors["IRQ"]): roots.append(P.vectors["IRQ"])   # scanline IRQ / BRK
     P.roots = roots
     entries = roots + [a for a in extra if inrom(a)]
     P.extra = set(entries[len(roots):])
@@ -284,7 +337,9 @@ def trace(prg, kind="nrom", extra=()):
             if len(seq) == 4 and [x[1:3] for x in seq] == [("LDA", "imm"), ("PHA", "imp")] * 2:
                 v = mem.at(a, ((seq[0][3] << 8 | seq[2][3]) + 1) & 0xFFFF)
                 if v is not None and inrom(v): pushed.add(v)
+        ramcode = _ram_copies(code, mem)
         engines = P.engines | {t for t in calls if is_engine(code, t)}
+        inline = P.inline | {t for t in calls if t not in engines and is_inline(code, t)}
         tables = {}
         for c in sorted(a for a, d in code.items() if d[1] == "JSR" and mem.at(a, d[3]) in engines):
             t, tg = nxt(c, 3), []
@@ -303,6 +358,7 @@ def trace(prg, kind="nrom", extra=()):
                 dispatch[site] = tg + [t for t in dispatch.get(site, []) if t not in tg]
         xbank = _bank_flow(P, code, engines, tables, dispatch) if uxrom else {}
         dbank = P.dbank_new if uxrom else {}
+        wram = _wram_copy(code, mem, P.izy_bank) if uxrom else None
         # bank sets only grow between rounds; "unknown" only if never known
         for new, old in ((xbank, P.xbank), (dbank, P.dbank)):
             for site, bk in old.items():
@@ -310,9 +366,12 @@ def trace(prg, kind="nrom", extra=()):
                 n = new.get(site)
                 new[site] = bk if n is None else n if bk is None else n | bk
         if engines == P.engines and tables == P.tables and dispatch == P.dispatch \
-                and xbank == P.xbank and dbank == P.dbank and pushed <= P.pushed: break
+                and xbank == P.xbank and dbank == P.dbank and pushed <= P.pushed \
+                and ramcode == P.ramcode and inline == P.inline and (mem.wram_code or wram) == mem.wram_code: break
         P.engines, P.tables, P.dispatch, P.xbank, P.dbank = engines, tables, dispatch, xbank, dbank
         P.pushed |= pushed
+        P.ramcode, P.inline = ramcode, inline
+        mem.wram_code = mem.wram_code or wram      # once found, kept
 
     for tg in P.tables.values(): labels.update(tg)
     for tg in P.dispatch.values(): labels.update(tg)
@@ -337,6 +396,68 @@ def trace(prg, kind="nrom", extra=()):
             a = nxt(a, n)
     _stack_depth(P)
     return P
+
+
+def _ram_copies(code, mem):
+    """RAM address -> ROM address, for code a game copies into RAM and
+    calls there right away (like a timing loop): a LDA rom,X / STA ram,X
+    (or ,Y) copy loop shortly before a JSR / JMP into what it copied."""
+    copies = []
+    for a, (n, m, mode, arg) in code.items():
+        if m != "LDA" or mode not in ("abx", "aby"): continue
+        d = code.get(nxt(a, n))
+        if d is None or d[1] != "STA" or d[2] not in (("zpx", "abx") if mode == "abx" else ("aby",)) \
+                or d[3] >= 0x800:
+            continue
+        src = mem.at(a, arg)
+        if src is not None and mem.inrom(src): copies.append((a, d[3], src))
+    out = {}
+    for a, (n, m, mode, arg) in code.items():
+        if m not in ("JSR", "JMP") or mode != "abs" or arg >= 0x2000: continue
+        t = arg & 0x7FF
+        near = [(t - dst, src) for c, dst, src in copies
+                if 0 <= t - dst < 0x100 and c >> 16 == a >> 16 and 0 < a - c < 0x40]
+        if near:
+            k, src = min(near)
+            v = canon(src + k)
+            if mem.inrom(v): out[t] = v
+    return out
+
+
+def _wram_copy(code, mem, izy_bank):
+    """LDA (p),Y / STA (q),Y right after q is set to a PRG RAM address and p
+    to a PRG one: the game copies PRG into PRG RAM (to run it there).
+    -> (RAM address, PRG address it came from, length) or None."""
+    pred = {}
+    for a, (n, m, mode, arg) in code.items():
+        if m not in ENDS_FLOW: pred[nxt(a, n)] = a
+    for a, (n, m, mode, arg) in sorted(code.items()):
+        if m != "LDA" or mode != "izy": continue
+        d = code.get(nxt(a, n))
+        if d is None or d[1:3] != ("STA", "izy"): continue
+        seq, b = [], a
+        while b in pred and len(seq) < 16:
+            b = pred[b]; seq.append(b)
+            if code[b][1] == "JSR": break
+        A = X = None
+        zp = {}
+        for b in reversed(seq):
+            _, m2, mode2, arg2 = code[b]
+            if m2 == "LDA": A = arg2 if mode2 == "imm" else None
+            elif m2 == "LDX": X = arg2 if mode2 == "imm" else None
+            elif m2 == "STA" and mode2 == "zp": zp[arg2] = A
+            elif m2 in ("JSR", "TXA", "TYA", "PLA") or m2 in _A_WRITERS: A = None
+        v = [zp.get(x & 0xFF) for x in (d[3], d[3] + 1, arg, arg + 1)]
+        if None in v: continue
+        dst, src = v[0] | v[1] << 8, v[2] | v[3] << 8
+        if not (0x6000 <= dst < 0x8000 and src >= 0x8000): continue
+        sl = mem.slot(src)
+        if sl is not None:
+            bk = izy_bank.get(a)
+            if not bk or len(bk) != 1 or next(iter(bk))[sl] is None: continue
+            src = mem.banked(src, next(iter(bk))[sl])
+        return dst, src, min(0x8000 - dst, (X or 0x20) * 0x100, 0x10000 - (src & 0xFFFF))
+    return None
 
 
 # A-register effects for the dispatch pattern scan
@@ -493,7 +614,7 @@ def _find_dispatch(code, engines, decode, mem, dbank={}):
             elif m2 in ("PLA", "PLP"):
                 v = stack.pop() if stack else None
                 if m2 == "PLA": A = v
-            elif m2 == "JSR": A, stack = None, []
+            elif m2 == "JSR": A = None      # a called routine leaves the stack as it was
             elif m2 not in _KEEPS_A and mode2 != "rel": A = None
         if m == "RTS":
             if len(stack) < 2: continue
@@ -545,7 +666,7 @@ def _bank_flow(P, code, engines, tables, dispatch):
         if m not in ENDS_FLOW and m != "JSR" and a not in P.nofall:
             succ.append(nxt(a, n))
         if m == "JSR":      # the code after the call follows the code before it
-            succ.append(nxt(a, n))
+            succ.append(P.inline_cont.get(a, nxt(a, n)))
         for t in succ: preds.setdefault(t, []).append(a)
     tracked, seen = set(), set()
     work = [(a, 0) for a, (n, m, mode, arg) in code.items()
@@ -558,7 +679,7 @@ def _bank_flow(P, code, engines, tables, dispatch):
         if m in ("LDA", "LDX", "LDY") and (mode == "zp" or (mode == "abs" and arg < 0x2000)):
             tracked.add(arg & 0x7FF)
         work += [(b, d + 1) for b in preds.get(a, ())]
-    tracked |= {"sel", "stk"}
+    tracked |= {"sel", "stk", "sr"}
 
     # per routine entry: (switches banks or calls into the switchable half,
     # registers written), through everything it calls
@@ -600,7 +721,7 @@ def _bank_flow(P, code, engines, tables, dispatch):
             if m == "JSR" and mem.at(a, arg) in engines: calls.update(tables.get(a, []))
             elif a in dispatch: calls.update(dispatch[a])
             if m not in ENDS_FLOW and a not in P.nofall and not (m == "JSR" and mem.at(a, arg) in engines):
-                work.append(nxt(a, n))
+                work.append(P.inline_cont.get(a, nxt(a, n)))
         return direct, regs, calls, seen
 
     summ = {}
@@ -628,7 +749,7 @@ def _bank_flow(P, code, engines, tables, dispatch):
         if mode == "rel": t.append(branch_target(a, arg))
         if m == "JMP" and mode == "abs" and mem.at(a, arg) is not None: t.append(mem.at(a, arg))
         if m not in ENDS_FLOW and a not in P.nofall and not (m == "JSR" and mem.at(a, arg) in engines):
-            t.append(nxt(a, n))
+            t.append(P.inline_cont.get(a, nxt(a, n)))
         succ[a] = [x for x in t if x in code]
         for x in succ[a]: pred.setdefault(x, []).append(a)
         if m == "JSR" and mem.at(a, arg) in code: pred.setdefault(mem.at(a, arg), []).append(a)
@@ -650,6 +771,8 @@ def _bank_flow(P, code, engines, tables, dispatch):
     xbank, dbank, memo, active, ncontexts = {}, {}, {}, set(), {}
     nsl = mem.nslots
     P.mode1 = set()         # MMC3 $8000 writes selecting PRG mode 1
+    P.izy_bank = {}
+    P.m1mode = set()        # MMC1 control writes selecting a PRG mode other than 3
 
     def proj(bk, sl):
         """banks that may be in slot sl, or None"""
@@ -686,7 +809,7 @@ def _bank_flow(P, code, engines, tables, dispatch):
 
     def setm(s, addr, v):
         if addr not in tracked: return s
-        if addr != "stk" and not isinstance(v, int): v = None
+        if addr not in ("stk", "sr") and not isinstance(v, int): v = None
         ms = frozenset((k, x) for k, x in s[4] if k != addr)
         return s[:4] + ((ms | {(addr, v)}) if v is not None else ms,)
 
@@ -718,11 +841,14 @@ def _bank_flow(P, code, engines, tables, dispatch):
         v = mem.at(site, t)
         if v is not None:
             if v not in code: return havoc(s)
-            keep = livein.get(v, {0, 1, 2}) if rel.get(v, True) else set()
-            r = routine(v, tuple(s[i] if i in keep else None for i in range(3)) + s[3:])
+            # a routine that never switches banks: analysed once for any
+            # registers and banks, which it leaves as they were
+            sw = rel.get(v, True)
+            keep = livein.get(v, {0, 1, 2}) if sw else set()
+            r = routine(v, tuple(s[i] if i in keep else None for i in range(3)) + (s[3] if sw else None, s[4]))
             if r is None: return None
             w = wr.get(v, {0, 1, 2})
-            r = tuple(r[i] if r[i] is not None or i in w else s[i] for i in range(3)) + r[3:]
+            r = tuple(r[i] if r[i] is not None or i in w else s[i] for i in range(3)) + (r[3] if sw else s[3], r[4])
             return setm(r, "stk", getm(s, "stk"))
         sl = mem.slot(t)
         bks = proj(s[3], sl)
@@ -738,7 +864,7 @@ def _bank_flow(P, code, engines, tables, dispatch):
 
     def routine(entry, s):
         if entry not in code: return havoc(s)      # traced in the next round
-        if entry >> 16:
+        if entry >> 16 and mem.slot(entry & 0xFFFF) is not None:
             s = s[:3] + (fixb(s[3], mem.slot(entry & 0xFFFF), mem.bank(entry)), s[4])
         s = setm(s, "stk", ())
         key = (entry, s)
@@ -747,6 +873,12 @@ def _bank_flow(P, code, engines, tables, dispatch):
         k = ncontexts.get(entry, 0)
         if k >= 24 and s[4] != frozenset({("stk", ())}):
             return routine(entry, s[:4] + (frozenset(),))
+        # then a routine that switches banks itself (like SetPRG with the
+        # bank in A, called from everywhere) without the banks on entry
+        sl = mem.slot(entry & 0xFFFF) if entry >> 16 else None
+        if k >= 36 and summ.get(entry, (False,))[0] \
+                and s[3] != (None if sl is None else fixb(None, sl, mem.bank(entry))):
+            return routine(entry, s[:3] + (None, s[4]))
         if k >= 48 and s[:3] != (None, None, None):
             return routine(entry, havoc(s))
         ncontexts[entry] = k + 1
@@ -781,6 +913,9 @@ def _bank_flow(P, code, engines, tables, dispatch):
         if (not a >> 16 or mem.mmc3) and (m == "JMP" and mode == "ind" or m == "RTS"):
             old = dbank.get(a, frozenset())     # banks mapped at a computed jump
             dbank[a] = None if bk is None or old is None else old | bk
+        if m == "LDA" and mode == "izy":        # copy loops (see _wram_copy)
+            old = P.izy_bank.get(a, frozenset())
+            P.izy_bank[a] = None if bk is None or old is None else old | bk
         fall = nxt(a, n)
         stk = getm(s, "stk")
         if m in ("LDA", "LDX", "LDY"):
@@ -808,6 +943,23 @@ def _bank_flow(P, code, engines, tables, dispatch):
                         if sel is None: s = (A, X, Y, None, ms)
                         elif sel & 7 >= 6:
                             s = (A, X, Y, setb(bk, (sel & 7) - 6, None if v is None else v & (nb - 1)), ms)
+                elif mem.mmc1:
+                    # serial port: 5 writes of bit 0, bit 7 resets. "sr" =
+                    # (bits so far or None, count); unknown: a fresh sequence
+                    bits, cnt = getm(s, "sr") or (0, 0)
+                    if v is not None and v & 0x80:
+                        bits, cnt = 0, 0
+                    else:
+                        bits = None if bits is None or v is None else bits | (v & 1) << cnt
+                        cnt += 1
+                    if cnt == 5:
+                        reg = (arg >> 13) & 3
+                        if reg == 3:
+                            s = (A, X, Y, setb(None, 0, None if bits is None else bits & (nb - 1)), ms)
+                        elif reg == 0 and bits is not None and bits & 0x0C != 0x0C:
+                            P.m1mode.add(a)
+                        bits, cnt = 0, 0
+                    s = setm(s, "sr", (bits, cnt))
                 else:
                     if v is not None:
                         ra = rom_addr(a, mode, arg, s)
@@ -847,7 +999,7 @@ def _bank_flow(P, code, engines, tables, dispatch):
             if mem.at(a, arg) in engines:
                 return [], each(tables.get(a, []), s)
             r = call(a, arg, s)
-            return ([(fall, r)] if r is not None else []), None
+            return ([(P.inline_cont.get(a, fall), r)] if r is not None else []), None
         if m == "JMP":
             if a in dispatch: return [], each(dispatch[a], s)
             t = arg
@@ -909,6 +1061,9 @@ def _stack_depth(P):
             if m == "JSR" and mem.at(a, arg) in P.engines:
                 # cases run at the dispatch site's depth (the engine pops its own return)
                 work += [(t, d, None) for t in P.tables.get(a, [])]
+                break
+            if a in P.inline_cont:
+                work.append((P.inline_cont[a], d, sx))
                 break
             a = nxt(a, n)
     P.depth = depth

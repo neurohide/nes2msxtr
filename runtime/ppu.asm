@@ -290,6 +290,8 @@ if MMC3_CHR
         or a                    ; copy must show them now (games read CHR
         jr z, pk_now            ; ROM data through $2007)
         ld a, i
+        jp pe, $+5              ; NMOS bug: an interrupt at LD A,I reads as DI
+        ld a, i
         push af
         di
         push hl
@@ -379,6 +381,8 @@ pal_set:
         add hl, bc
         ld bc, nes_rgb
         add hl, bc
+        ld a, i
+        jp pe, $+5              ; NMOS bug: an interrupt at LD A,I reads as DI
         ld a, i
         push af
         di
@@ -915,6 +919,8 @@ nt_emit:
         add a, l
         ld l, a
         ld a, i
+        jp pe, $+5              ; NMOS bug: an interrupt at LD A,I reads as DI
+        ld a, i
         push af
         di
         ld a, $07
@@ -1054,6 +1060,8 @@ dma_done:
 
 ; Convert OAM to V9990 sprites. Clobbers HL; preserves BC, DE, IX, IY.
 spr_update:
+        ld a, (su_iff)          ; the vblank isr can interrupt a spr_update of
+        push af                 ; the main code: keep its su_iff
         push bc
         push de
         push ix
@@ -1072,6 +1080,8 @@ spr_update:
 su_kb:  ld a, c
         ld (su_kbase), a
         ld a, i                 ; interrupts stay as they were, except around
+        jp pe, $+5              ; NMOS bug: an interrupt at LD A,I reads as DI
+        ld a, i
         ld a, 0                 ; VRAM address writes: a long upload must not
         jp po, $+4              ; hold off the split line interrupt
         inc a
@@ -1099,6 +1109,8 @@ su_nx:  inc e
         pop ix
         pop de
         pop bc
+        pop af
+        ld (su_iff), a
         ret
 
 su_hide:
@@ -1209,15 +1221,19 @@ su_vwaddr:
 ; 8 slots from a hash of the key; a miss takes the first slot not used yet
 ; in this pass. Carry set if it uploaded. Clobbers BC, DE, HL.
 su_find:
+        ld a, e                 ; hash: tile x5 (runs of tiles don't pile into
+        add a, a                ; one window; a slot outside the 8 probed is
+        add a, a                ; never found again) ^ key bits x32
+        add a, e
+        ld l, a
         ld a, c
-        rlca
-        rlca
-        rlca
-        rlca
-        xor e
+        rrca
+        rrca
+        rrca
+        xor l
         ld l, a
         ld d, 8
-        ld b, 0                 ; B = 1: free slot found (in sp_free)
+        ld b, 0                 ; B = age of the victim slot (in sp_free)
 sf_l:   ld h, SC_TLO >> 8
         ld a, (hl)
         cp e
@@ -1226,16 +1242,15 @@ sf_l:   ld h, SC_TLO >> 8
         ld a, (hl)
         cp c
         jr z, sf_hit
-sf_no:  ld a, b
-        or a
-        jr nz, sf_nx
-        ld h, SC_STAMP >> 8
-        ld a, (su_stamp)
-        cp (hl)
-        jr z, sf_nx             ; in use by an earlier sprite of this pass
+sf_no:  ld h, SC_STAMP >> 8     ; B = age of the oldest slot so far (0: none).
+        ld a, (su_stamp)        ; Oldest, not first stale: a slot used last
+        sub (hl)                ; pass may belong to a sprite later in this
+        cp b                    ; one, and evicting it cascades into a miss
+        jr c, sf_nx             ; for every sprite, every frame. Age 0 =
+        jr z, sf_nx             ; used by this pass: never taken.
+        ld b, a
         ld a, l
         ld (sp_free), a
-        inc b
 sf_nx:  inc l
         dec d
         jr nz, sf_l

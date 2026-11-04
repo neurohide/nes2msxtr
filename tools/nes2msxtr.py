@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""nes2msxtr: statically recompile an NROM, UxROM or MMC3 NES game into an MSX
+"""nes2msxtr: statically recompile an NROM, UxROM, MMC1 or MMC3 NES game into an MSX
 turboR cartridge (ASCII16 megaROM) that renders on a V9990 (GFX9000).
 
 usage: nes2msxtr.py game.nes out_dir [--crop N] [--bank-kb N] [--pad-kb N] [--splash PNG]
@@ -80,14 +80,15 @@ def flag_liveness(P):
 
 
 class Translator:
-    def __init__(self, P, multibank):
+    def __init__(self, P, multibank, wram=False):
         self.P = P
         self.mem = P.mem
         self.multi = multibank
+        self.wram = wram                # PRG RAM at $6000-$7FFF
         self.warn = list(P.warnings)
         self.v_used = any(d[1] in ("BVC", "BVS") for d in P.code.values())
         self.engine_body = set()
-        for e in P.engines:
+        for e in P.engines | P.inline:
             a = e
             while a in P.code:
                 self.engine_body.add(a)
@@ -134,7 +135,7 @@ class Translator:
     # -- operand addressing -------------------------------------------------
     def addr(self, mode, arg):
         """-> (lines, kind, value). kinds: imm, ram_abs (MSX addr),
-        ram_hl, rom_hl, io (NES addr), gen_hl (HL = NES address)."""
+        ram_hl, rom_hl, wram_hl, io (NES addr), gen_hl (HL = NES address)."""
         X = ["ex af,af'"]
         if mode == "imm": return [], "imm", arg
         if mode == "zp": return [], "ram_abs", RAMB + arg
@@ -145,6 +146,7 @@ class Translator:
             if arg < 0x2000: return [], "ram_abs", RAMB + (arg & 0x7FF)
             if arg < 0x4020: return [], "io", arg
             if arg >= 0x8000: return [f"ld hl,{arg}"], "rom_hl", arg
+            if arg >= 0x6000 and self.wram: return [f"ld hl,{arg}"], "wram_hl", arg
             self.warn.append(f"access to ${arg:04X} (no device there)")
             return [f"ld hl,{arg}"], "gen_hl", arg
         if mode in ("abx", "aby"):
@@ -157,6 +159,8 @@ class Translator:
                 wrap = ["and $C7", "ld h,a"]   # A = H after the add
             elif base >= 0x8000 and base + 0xFF <= 0xFFFF:
                 b, kind = base, "rom_hl"
+            elif self.wram and base >= 0x6000 and base + 0xFF < 0x8000:
+                b, kind = base, "wram_hl"
             else:
                 b, kind = base, "gen_hl"
             if b & 0xFF == 0 and not wrap and kind != "gen_hl":
@@ -198,6 +202,7 @@ class Translator:
                 return self.addr(mode, wb)[0] + [f"call rom_rd{half}"], "l"
             return lines + ["call rom_rd"], "l"
         if kind == "io": return [f"call {self.io_rd(v)}"], "l"
+        if kind == "wram_hl": return lines + ["call wram_rd"], "l"
         return lines + ["call mem_rd"], "l"
 
     def io_rd(self, v):
@@ -229,6 +234,7 @@ class Translator:
         """JMP to NES address t from the current instruction"""
         v = self.mem.at(self.cur, t)
         if v == self.cur and self.unwind: return ["jp spin_wait"]
+        if t < 0x2000 and (t & 0x7FF) in self.P.ramcode: return [("JP", self.P.ramcode[t & 0x7FF])]
         if t < 0x2000: return [f"ld hl,{t & 0x7FF}", "jp ram_jump"]      # code built in RAM
         if v is not None: return [("JP", v)]
         return [f"ld hl,{t}", "jp dyn_jump"]     # into the bank mapped now
@@ -276,6 +282,37 @@ class Translator:
             if m in NZ_OPS or m in ("JMP", "JSR", "RTS", "RTI"): break
             a += n
         return need
+
+    def ret_lines(self, a, m, d):
+        """RTS / RTI at a, reached at stack depth d"""
+        if a in self.unwind:
+            return ["; leaves the routine the NMI interrupted"] + \
+                ((["ld hl,s6_ptr", "inc (hl)", "inc (hl)"]) if self.faithful else []) + ["jp nmi_rts"]
+        if m == "RTS" and d == 2:
+            # PHA/PHA/RTS: jump to the pushed address + 1
+            if a not in self.P.dispatch:
+                self.warn.append(f"${a:04X}: RTS dispatch with unknown targets (resolved at run time)")
+            return ["jp rts_jump"]
+        if m == "RTS" and (d > 0 or d % 2):     # -2k: k return frames dropped
+            self.warn.append(f"${a:04X}: RTS at stack depth {d} not supported")
+        if m == "RTI" and self.mem.mmc1: return ["jp rti_rt"]
+        if m == "RTI": return ["ld hl,s6_ptr", "inc (hl)", "inc (hl)", "inc (hl)", "ret"]
+        return (["ld hl,s6_ptr", "inc (hl)", "inc (hl)"] if self.faithful else []) + ["ret"]
+
+    def rts_depth(self, a):
+        """Stack depth the RTS at a is translated for: 2 when it dispatches
+        (PHA/PHA/RTS), even if a plain return also jumps to it."""
+        return 2 if a in self.P.dispatch else self.P.depth.get(a, 0)
+
+    def rts_edge(self, a, t):
+        """A branch at a to the RTS at t reaching it at another stack depth
+        than the one t is translated for (one RTS shared by a return and a
+        PHA/PHA/RTS dispatch): its own return code, else None."""
+        d = self.P.depth.get(a)
+        if d is None or self.P.code.get(t, (0, ""))[1] != "RTS" or t in self.unwind \
+                or self.rts_depth(t) == d:
+            return None
+        return self.ret_lines(t, "RTS", d)
 
     # -- one instruction ---------------------------------------------------------
     def insn(self, a):
@@ -328,6 +365,7 @@ class Translator:
             if kind == "ram_abs": L += [f"ld hl,{v}", "ld l,(hl)"]
             elif kind == "io": L += [f"call {self.io_rd(v)}"]
             elif kind == "rom_hl": L += lines + ["call rom_rd"]
+            elif kind == "wram_hl": L += lines + ["call wram_rd"]
             else: L += lines + ["call mem_rd"]
             need = self.bit_needs(a)
             if need == {"N", "Z"}:
@@ -343,7 +381,10 @@ class Translator:
             if kind == "ram_abs":
                 L += [f"ld ({v}),a"] if reg == "a" else [f"ld hl,{v}", f"ld (hl),{reg}"]
             elif kind == "ram_hl": L += lines + [f"ld (hl),{reg}"]
+            elif kind == "wram_hl": L += lines + [f"call wram_w{reg}"]
             elif kind == "io": L += [f"ld l,{reg}", f"call {io_write_handler(v)}"]
+            elif kind == "rom_hl" and self.mem.mmc1:      # indexed: the base's register
+                L += [f"ld h,{arg >> 8}", f"ld l,{reg}", "call m1_wr"]
             elif kind == "rom_hl" and self.mem.mmc3:
                 if mode == "abs":
                     h = MMC3_W[(arg >> 12 & 6) | (arg & 1)]
@@ -415,10 +456,16 @@ class Translator:
                     self.zs = True
                 elif zs:
                     self.zs = True
-                L.append(f"jp {cc},spin_wait" if t == a and self.unwind else ("JPCC", cc, t))
+                edge = self.rts_edge(a, t)
+                if edge:
+                    inv = {"z": "nz", "nz": "z", "c": "nc", "nc": "c", "m": "p", "p": "m"}[cc]
+                    L += [f"jp {inv},$+{3 + sum(zsize(x) for x in edge)}"] + edge
+                else:
+                    L.append(f"jp {cc},spin_wait" if t == a and self.unwind else ("JPCC", cc, t))
         elif m == "JMP":
             if mode == "abs":
-                L += self.jump(arg); return L, False
+                edge = self.rts_edge(a, self.mem.at(a, arg))
+                L += edge if edge else self.jump(arg); return L, False
             if arg < 0x2000:
                 p = RAMB + (arg & 0x7FF)
                 if arg & 0xFF == 0xFF:
@@ -428,6 +475,8 @@ class Translator:
                 L += ["jp dyn_jump"]
             elif arg >= 0x8000 and self.mem.at(a, arg) is not None:
                 L += self.jump(self.mem.rw(self.mem.at(a, arg)))
+            elif 0x6000 <= arg < 0x8000 and self.wram:        # pointer in PRG RAM
+                L += [f"ld hl,{arg + 1}", "call wram_rd", "ld b,l", f"ld hl,{arg}", "call wram_rd", "ld h,b", "ld b,0", "jp dyn_jump"]
             else:
                 self.warn.append(f"${a:04X}: JMP (${arg:04X}) through I/O space")
                 L += ["jp crash"]
@@ -435,31 +484,24 @@ class Translator:
         elif m == "JSR":
             ret = (a + 2) & 0xFFFF
             t = self.mem.at(a, arg)
-            if t is not None and t in self.P.engines:
+            if t is not None and (t in self.P.engines or t in self.P.inline):
                 L += self.push_bytes([ret >> 8, ret & 0xFF]) + [("JP", t)]
                 return L, False
             if self.faithful: L += self.push_bytes([ret >> 8, ret & 0xFF])
             # fixed bank into the switchable half: whatever bank is mapped
-            if arg < 0x2000: L += [f"ld hl,{arg & 0x7FF}", "call ram_jump"]   # code built in RAM
+            if arg < 0x2000 and (arg & 0x7FF) in self.P.ramcode: L += [("CALL", self.P.ramcode[arg & 0x7FF])]
+            elif arg < 0x2000: L += [f"ld hl,{arg & 0x7FF}", "call ram_jump"]   # code built in RAM
             else: L += [("CALL", t)] if t is not None else [f"ld hl,{arg}", "call dyn_call"]
         elif m in ("RTS", "RTI"):
-            d = self.P.depth.get(a, 0)
-            if a in self.unwind:
-                L += ["; leaves the routine the NMI interrupted"]
-                if self.faithful: L += ["ld hl,s6_ptr", "inc (hl)", "inc (hl)"]
-                L += ["jp nmi_rts"]
-                return L, False
-            if m == "RTS" and d == 2:
-                # PHA/PHA/RTS: jump to the pushed address + 1
-                if a not in self.P.dispatch:
-                    self.warn.append(f"${a:04X}: RTS dispatch with unknown targets (resolved at run time)")
-                L += ["jp rts_jump"]
-                return L, False
-            if m == "RTS" and (d > 0 or d % 2):     # -2k: k return frames dropped
-                self.warn.append(f"${a:04X}: RTS at stack depth {d} not supported")
-            if m == "RTI": L += ["ld hl,s6_ptr", "inc (hl)", "inc (hl)", "inc (hl)"]
-            elif self.faithful: L += ["ld hl,s6_ptr", "inc (hl)", "inc (hl)"]
-            L += ["ret"]
+            L += self.ret_lines(a, m, self.rts_depth(a) if m == "RTS" else self.P.depth.get(a, 0))
+            return L, False
+        elif m == "BRK" and self.mem.mmc1:
+            # software interrupt: PCH PCL P frame (PC+2), through the IRQ vector. Its RTI (rti_rt)
+            # jumps to the PC it pulls: the handler steps it over the data after the BRK.
+            ret = (a + 2) & 0xFFFF
+            L += self.push_bytes([ret >> 8, ret & 0xFF]) + ["call php_rt", "call brk_mark"]
+            t = self.mem.at(a, self.P.vectors["IRQ"])
+            L += [("JP", t)] if t is not None else [f"ld hl,{self.P.vectors['IRQ']}", "jp dyn_jump"]
             return L, False
         elif m == "BRK":
             self.warn.append(f"${a:04X}: BRK"); L += ["jp crash"]; return L, False
@@ -813,11 +855,12 @@ def build(rom_path, out_dir, crop, bank_kb, pad_kb=0, splash=None):
     rom = open(rom_path, "rb").read()
     if rom[:4] != b"NES\x1a": sys.exit("not an iNES file")
     mapper = (rom[6] >> 4) | (rom[7] & 0xF0)
-    kind = {0: "nrom", 2: "uxrom", 4: "mmc3"}.get(mapper)
-    if kind is None: sys.exit(f"mapper {mapper} not supported (NROM, UxROM and MMC3 only)")
+    kind = {0: "nrom", 1: "mmc1", 2: "uxrom", 4: "mmc3"}.get(mapper)
+    if kind is None: sys.exit(f"mapper {mapper} not supported (NROM, UxROM, MMC1 and MMC3 only)")
     ux, mmc3 = kind != "nrom", kind == "mmc3"
     prg_n, chr_n = rom[4], rom[5]
     if kind != "mmc3" and chr_n > 1: sys.exit("multiple CHR banks not supported")
+    if kind == "mmc1" and prg_n > 16: sys.exit("MMC1 with more than 256K PRG (SUROM) not supported")
     if ux and (prg_n < 2 or prg_n & (prg_n - 1)): sys.exit(f"{kind} with {prg_n} PRG banks not supported")
     if not ux and prg_n not in (1, 2): sys.exit(f"NROM with {prg_n} PRG banks")
     if chr_n & (chr_n - 1): sys.exit(f"{chr_n} CHR banks not supported")
@@ -833,13 +876,21 @@ def build(rom_path, out_dir, crop, bank_kb, pad_kb=0, splash=None):
         chr_ = chr_ + bytes(0x2000 - len(chr_))
         print(f"warning: CHR data is only {len(chr_)} bytes; padded with zeros", file=sys.stderr)
     mirror_v = rom[6] & 1
+    # PRG RAM at $6000-$7FFF: NES 2.0 gives its size; otherwise 8K on
+    # MMC1 / MMC3 boards and with a battery. MMC1 (SOROM / SXROM) selects
+    # 8K banks with CHR register 0 bits 3 / 3-2.
+    if rom[7] & 0x0C == 0x08:
+        wram = sum(64 << n for n in (rom[10] & 15, rom[10] >> 4) if n)
+    else:
+        wram = 0x2000 if kind in ("mmc1", "mmc3") or rom[6] & 2 else 0
+    wram_banks = min(4 if kind == "mmc1" else 1, max(1, wram // 0x2000)) if wram else 0
 
     extra = read_entries(os.path.join(out_dir, "entries.txt"), nestrace.Mem(prg, kind))
     P = nestrace.trace(prg, kind, extra)
     cap = bank_kb * 1024 - 0x100
     items = None
     for multi in ((True,) if bank_kb < 32 or ux else (False, True)):
-        T = Translator(P, multi)
+        T = Translator(P, multi, wram_banks > 0)
         items = T.translate()
         # multi-bank: leave room in each bank for copies of hot routines
         banks = pack(items, cap - cap // 10 if multi else 0x7F00, multi)
@@ -859,15 +910,19 @@ def build(rom_path, out_dir, crop, bank_kb, pad_kb=0, splash=None):
     d_spr0 = add("spr0"); add("spr1")
     d_misc = add("misc")
     for i in range((pad_kb + 15) // 16): add("pad")     # testing: more RAM
+    d_wram = 0
+    for i in range((wram_banks + 1) // 2):
+        k = add("wram")
+        d_wram = d_wram or k
     # computed-jump lookup (runtime dyn_find): every address a computed
     # jump, a call or a fixed-bank jump into the switchable half can reach
     nmi, reset = P.vectors["NMI"], P.vectors["RESET"]
     dyn = {t for tg in P.tables.values() for t in tg} | {t for tg in P.dispatch.values() for t in tg} \
-        | set(P.calls) | {nmi, reset} | P.extra | P.pushed
+        | set(P.calls) | {nmi, reset} | P.extra | P.pushed | set(P.inline_cont.values())
     for site, bk in P.xbank.items():
         dyn |= {P.mem.banked(P.code[site][3], b) for b in bk or ()}
     dyn = [t for t in dyn if t in bank_of]
-    key = lambda a: (a & 0xFF, (a >> 8) & 0xFF, max(0, P.mem.bank(a)))
+    key = lambda a: (a & 0xFF, (a >> 8) & 0xFF, max(0, P.mem.bank(a)) if a & 0xFFFF >= 0x8000 else 0)
     dyn.sort(key=key)
     dyn_size = 2 * 257 + 5 * len(dyn)
     d_dyn, dyn_org = (d_misc, 0xA000) if dyn_size <= 0x2000 else (add("dyn"), 0x8000)
@@ -916,6 +971,9 @@ def build(rom_path, out_dir, crop, bank_kb, pad_kb=0, splash=None):
         f"NSEGS: equ {nsegs}", f"BG_BANK: equ {bg_bank}", f"DSEG_PRG0: equ {d_prg0}",
         f"DSEG_PRG1: equ {d_prg1}", f"DSEG_SPR0: equ {d_spr0}", f"DSEG_MISC: equ {d_misc}",
         f"DSEG_DYN: equ {d_dyn}", f"UXROM: equ {int(kind == 'uxrom')}", f"MMC3: equ {int(mmc3)}",
+        f"MMC1: equ {int(kind == 'mmc1')}", f"WRAM: equ {int(wram_banks > 0)}",
+        f"DSEG_WRAM: equ {d_wram}", f"WRAM_MASK: equ {max(1, wram_banks) - 1}",
+        f"WRAM_SHIFT: equ {3 if wram_banks == 2 else 2}",
         f"PRG_MASK: equ {len(prg) // P.mem.unit - 1}",
         f"CHR_RAM: equ {int(chr_ram)}", f"MMC3_CHR: equ {int(mmc3_chr)}",
         f"CHR_SHADOW: equ {int(chr_ram or mmc3_chr)}", f"CHR_BANK0: equ {chr_bank0}",
@@ -970,6 +1028,7 @@ def build(rom_path, out_dir, crop, bank_kb, pad_kb=0, splash=None):
             main += ['        include "dyn.asm"' if d_dyn == d_misc else '        defs $C000 - $, $ff']
         elif s == "dyn": main.append('        include "dyn.asm"')
         elif s == "pad": main.append('        defs $4000, $ff')
+        elif s == "wram": main.append('        defs $4000, 0')
         else: main.append(f'        incbin "{s}.bin"')
     main.append('        incbin "bg.bin"')
     if splash: main.append('        incbin "splash.bin"')
@@ -994,8 +1053,12 @@ def build(rom_path, out_dir, crop, bank_kb, pad_kb=0, splash=None):
     if getattr(P, "mode1", None):
         T.warn.append("MMC3 PRG mode 1 ($8000 bit 6) selected at " + ", ".join(f"${a:04X}" for a in sorted(P.mode1))
                       + "; only mode 0 is supported")
-    report = [f"input: {rom_path}", f"{ {'nrom': 'NROM', 'uxrom': 'UxROM', 'mmc3': 'MMC3'}[kind]}, PRG {len(prg) // 1024}K, "
-              f"{'CHR RAM' if chr_ram else f'CHR ROM {len(chr_rom) // 1024}K'}, mirroring {'vertical' if mirror_v else 'horizontal'}",
+    if getattr(P, "m1mode", None):
+        T.warn.append("MMC1 PRG mode other than 3 selected at " + ", ".join(f"${a:04X}" for a in sorted(P.m1mode))
+                      + "; only mode 3 (16K at $8000, last bank fixed) is supported")
+    report = [f"input: {rom_path}", f"{ {'nrom': 'NROM', 'uxrom': 'UxROM', 'mmc1': 'MMC1', 'mmc3': 'MMC3'}[kind]}, PRG {len(prg) // 1024}K, "
+              f"{'CHR RAM' if chr_ram else f'CHR ROM {len(chr_rom) // 1024}K'}, mirroring {'vertical' if mirror_v else 'horizontal'}"
+              + (f", PRG RAM {wram_banks * 8}K" if wram_banks else ""),
               f"6502 instructions: {len(P.code)}, jump tables: {len(P.tables)}, dispatchers: {len(P.engines)}, "
               f"computed-jump sites: {len(P.dispatch)}, lookup entries: {len(dyn)}",
               f"stack: {'faithful (TSX used: JSR return addresses kept in page 1)' if T.faithful else 'data only in page 1'}",

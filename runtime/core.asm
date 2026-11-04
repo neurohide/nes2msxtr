@@ -911,6 +911,55 @@ php_nov:
         pop af
         ret
 
+if MMC1
+; BRK: counts the software interrupt (HL clobbered, A and flags kept).
+brk_mark:
+        ld hl, brk_n
+        inc (hl)
+        ld hl, brk_ctx
+        push af
+        ld a, (in_nmi)
+        ld (hl), a
+        pop af
+        ret
+
+; RTI. The one that ends a BRK handler (started from the same NMI state)
+; jumps to the PC it pulls, which the handler may have moved on. Any other
+; RTI (the NMI's) returns through the Z80 stack.
+rti_rt:
+        push af
+        ld a, (brk_n)
+        or a
+        jr z, rti_ret
+        ld a, (brk_ctx)
+        ld hl, in_nmi
+        cp (hl)
+        jr nz, rti_ret
+        ld hl, brk_n
+        dec (hl)
+        pop af
+        call plp_rt             ; P (flags, A kept)
+        push af
+        push de
+        ld hl, (s6_ptr)
+        inc l
+        ld e, (hl)
+        inc l
+        ld d, (hl)
+        ld (s6_ptr), hl
+        ex de, hl
+        pop de
+        pop af
+        jp dyn_jump
+rti_ret:
+        pop af
+        ld hl, s6_ptr
+        inc (hl)
+        inc (hl)
+        inc (hl)
+        ret
+endif
+
 ; PLP: pull a 6502 status byte into carry, D (N/Z), vflag and p_id.
 ; Preserves A.
 plp_rt:
@@ -1056,9 +1105,11 @@ rr1_map:
 ; game avoids bus conflicts by writing the value the ROM holds there).
 ; Preserves AF, BC, DE.
 mapper_w:
-if UXROM
+if UXROM + MMC1
         push af
         ld a, i                 ; atomic, as mm_8001
+        jp pe, $+5              ; NMOS bug: an interrupt at LD A,I reads as DI
+        ld a, i
         push af
         di
         ld a, l
@@ -1073,6 +1124,151 @@ if UXROM
 mw_di:  pop af
 endif
         ret
+
+if MMC1
+; MMC1 serial port: H = NES address high byte, L = value. Bit 7 resets
+; the shift register; the 5th write loads the register H selects. Only
+; PRG mode 3 (16K at $8000, the last bank fixed) and CHR RAM / one 8K CHR
+; ROM bank. Preserves AF, BC, DE.
+m1_wr:
+        push af
+        ld a, i                 ; atomic, as mapper_w
+        jp pe, $+5              ; NMOS bug: an interrupt at LD A,I reads as DI
+        ld a, i
+        push af
+        di
+        bit 7, l
+        jr nz, m1_rst
+        rr l                    ; bit 0 in at the top, 5 writes: bits 7-3
+        ld a, (m1_sr)
+        rra
+        ld (m1_sr), a
+        ld a, (m1_cnt)
+        inc a
+        ld (m1_cnt), a
+        cp 5
+        jr nz, m1_done
+        ld a, (m1_sr)
+        rrca
+        rrca
+        rrca
+        and $1F
+        ld l, a                 ; L = register value
+        ld a, h                 ; address bits 14-13: the register
+        rlca
+        rlca
+        rlca
+        and 3
+        jr z, m1_ctrl
+        dec a
+        jr z, m1_chr0
+        dec a
+        call nz, mapper_w       ; $E000: PRG bank ($C000: CHR bank 1, unused)
+m1_rst: xor a
+        ld (m1_cnt), a
+        ld (m1_sr), a
+m1_done:
+        pop af
+        jp po, m1_di
+        ei
+m1_di:  pop af
+        ret
+; Control: mirroring (one-screen modes are not supported). It applies
+; to $2007 at once; the V9990 map is rebuilt at vblank.
+m1_ctrl:
+        ld a, l
+        and 3
+        cp 2
+        jr c, m1_rst
+        xor 3                   ; 2 vertical -> 1, 3 horizontal -> 0
+        ld hl, mir_v
+        cp (hl)
+        jr z, m1_rst
+        ld (hl), a
+        ld a, 1
+        ld (mir_dirty), a
+        jr m1_rst
+; CHR bank 0: on SOROM / SXROM also the PRG RAM bank
+m1_chr0:
+if WRAM_MASK
+        ld a, l
+        rrca
+        rrca
+if WRAM_SHIFT - 2
+        rrca
+endif
+        and WRAM_MASK
+        call wram_bank
+endif
+        jr m1_rst
+
+m1_sr:      db 0                ; shift register (bits 7-3 after 5 writes)
+m1_cnt:     db 0                ; writes so far
+endif
+
+if WRAM
+; HL = NES address $6000-$7FFF -> L = byte of the PRG RAM bank mapped
+; there. Preserves AF, BC, DE.
+wram_rd:
+        ex af, af'
+        ld a, h
+wr_hi:  xor $E0                 ; operand: $E0 / $C0, the bank's window half
+        ld h, a
+        ld a, (win_seg)
+wr_sg:  cp DSEG_WRAM            ; operand: the bank's segment
+        jr nz, wr_map
+wr_ok:  ld l, (hl)
+        ex af, af'
+        ret
+wr_map: ld a, (wr_sg + 1)
+        ld (win_seg), a
+        out (MAP_P2), a
+        jr wr_ok
+
+; HL = NES address $6000-$7FFF, value in A / C (X) / E (Y). Preserves
+; AF, BC, DE.
+wram_wa:
+        push af
+        jr ww_go
+wram_wc:
+        push af
+        ld a, c
+        jr ww_go
+wram_we:
+        push af
+        ld a, e
+ww_go:  push de
+        ld e, a
+        ld a, h
+ww_hi:  xor $E0                 ; operand: as wr_hi
+        ld h, a
+        ld a, (win_seg)
+ww_sg:  cp DSEG_WRAM            ; operand: as wr_sg
+        jr nz, ww_map
+ww_ok:  ld (hl), e
+        pop de
+        pop af
+        ret
+ww_map: ld a, (ww_sg + 1)
+        ld (win_seg), a
+        out (MAP_P2), a
+        jr ww_ok
+
+; A = 8K PRG RAM bank -> mapped at $6000-$7FFF. Clobbers AF, HL.
+wram_bank:
+        ld h, $E0
+        srl a
+        jr nc, wb_even
+        ld h, $C0
+wb_even:
+        add a, DSEG_WRAM
+        ld (wr_sg + 1), a
+        ld (ww_sg + 1), a
+        ld a, h
+        ld (wr_hi + 1), a
+        ld (ww_hi + 1), a
+        ret
+endif
 
 if MMC3
 ; MMC3 register writes, L = value. Preserves AF, BC, DE.
@@ -1093,6 +1289,8 @@ mm_8001:
         push de
         push hl
         ld a, i                 ; atomic: an interrupt must not see the bank
+        jp pe, $+5              ; NMOS bug: an interrupt at LD A,I reads as DI
+        ld a, i
         push af                 ; half switched (nes_bank1 vs rom_rd)
         di
         ld e, l                 ; E = value
@@ -1240,9 +1438,19 @@ mem_rd:
         ld l, (hl)
         pop af
         ret
-mr_io:  call io_rd_handler
+mr_io:
+if WRAM
+        cp $60
+        jr nc, mr_wram
+endif
+        call io_rd_handler
         pop af
         jp (hl)
+if WRAM
+mr_wram:
+        pop af
+        jp wram_rd
+endif
 
 ; HL = any NES address, A = value. Preserves AF, BC, DE.
 mem_wr_a:
@@ -1262,14 +1470,34 @@ mem_wr_v:
         ld (hl), a
         pop af
         ret
-mw_io:  call io_wr_handler
+mw_io:
+if WRAM
+        cp $60
+        jr nc, mw_wram
+endif
+        call io_wr_handler
         pop af
         push hl
         ld hl, (wr_val)
         ret                     ; -> handler with L = value
+if WRAM
+mw_wram:
+        ld a, (wr_val)
+        call wram_wa
+        pop af
+        ret
+endif
 if MMC3
 mw_rom: jp mapper_wa
-else
+endif
+if MMC1
+mw_rom: push af
+        ld a, (wr_val)
+        ld l, a
+        pop af
+        jp m1_wr
+endif
+if 1 - MMC3 - MMC1
 mw_rom: ld hl, (wr_val)
         jp mapper_w
 endif
@@ -1385,8 +1613,8 @@ endif
         ld (s0_state), a
         ld (split_on), a
         ld (isr_sp), sp         ; int_run finds the interrupted registers here
-if MMC3
-        ld a, (mir_dirty)       ; $A000 changed the mirroring: rebuild the map
+if MMC3 + MMC1
+        ld a, (mir_dirty)       ; the mapper changed the mirroring: rebuild the map
         or a
         jr z, isr_mir
         xor a

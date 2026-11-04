@@ -100,6 +100,8 @@ poll_seen:  equ VARS+89         ; the main loop is waiting at an idle point
 nmi_pend:   equ VARS+90         ; NMIs held back for the main loop's idle point
 dma_skips:  equ VARS+91         ; NMIs held back in a row
 idle_age:   equ VARS+92         ; vblanks since the main loop's last idle point
+brk_n:      equ VARS+93         ; MMC1: BRK software interrupts being handled
+brk_ctx:    equ VARS+94         ; ... in_nmi when the last one started
 
 ; V9990 ports (GFX9000 at $60)
 V_VRAM:     equ $60
