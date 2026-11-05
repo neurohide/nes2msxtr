@@ -37,8 +37,10 @@ work at all.
 
 | File in `sourcerom/` | Game | Mapper | SHA-1 (whole `.nes` file) |
 |---|---|---|---|
+| `bananadashdemo.nes` | Banana Dash demo | 2 (UxROM) | `581be5540c4765a6275f44c8d791eedd26563f9e` |
 | `contra.nes` | Contra (USA) | 2 (UxROM) | `c9ea66bb7cb30ad5343f1721b1d4d3219859319b` |
 | `doubledragonii.nes` | Double Dragon II: The Revenge (USA) | 4 (MMC3) | `457bf2438e11aa86947e5911c24f7075a9eceaeb` |
+| `nova.nes` | Nova | 1 (MMC1) | `b6b07ee76492ed475f39167c89b342353f999231` |
 | `supermariobros.nes` | Super Mario Bros. (Japan, USA) | 0 (NROM) | `33d23c2f2cfa4c9efec87f7bc1321ce3ce6c89bd` |
 
 Check yours with `shasum -a 1 sourcerom/*.nes`.
@@ -48,11 +50,12 @@ Check yours with `shasum -a 1 sourcerom/*.nes`.
 | Mapper | Name | PRG | CHR | Notes |
 |---|---|---|---|---|
 | 0 | NROM | 16K / 32K | 8K ROM or RAM | Sprite-0 split screens |
+| 1 | MMC1 | 16K banks at `$8000`, last one fixed (PRG mode 3), up to 256K | 8K RAM | PRG RAM at `$6000` (up to 32K) |
 | 2 | UxROM | 16K banks, the last one fixed | 8K RAM | |
 | 4 | MMC3 | 8K banks at `$8000` / `$A000`, last 16K fixed (PRG mode 0) | 1K / 2K ROM banks, or 8K RAM | Scanline IRQ splits, `$A000` mirroring |
 
-Not supported: other mappers, battery or work RAM at `$6000`, MMC3 PRG mode 1,
-and the DMC sound channel. See [docs/TECHNICAL.md](docs/TECHNICAL.md) for how
+Not supported: other mappers, battery saves, MMC1 PRG modes other than 3 (and
+SUROM, over 256K PRG), MMC3 PRG mode 1, and the DMC sound channel. See [docs/TECHNICAL.md](docs/TECHNICAL.md) for how
 translation works and the full list of limits.
 
 ## What you need
@@ -127,7 +130,6 @@ nes2msxtr/
   tools/          translator (nes2msxtr.py, nestrace.py) and test tools
   runtime/        Z80 runtime: PPU on the V9990, APU on the PSG, mappers
   testrom/        original test ROMs (NROM, UxROM, MMC3)
-  assets/         boot picture shown before the game
   docs/           technical notes and screenshots
 ```
 
@@ -153,14 +155,9 @@ on one (red backdrop), `make run` adds it to `build/<game>/entries.txt`;
 rebuild and play on. `make discover` finds them headless by playing the game
 automatically (see the samples below).
 
-At boot the cartridge shows `assets/0-nes-to-msx-turbor.png` on the V9990
-for 3 seconds, then starts the game. `tools/nes2msxtr.py --splash other.png`
-uses another picture (256 pixels wide, at most 212 high, a 16-colour indexed
-PNG) and `--splash ''` leaves it out; `make test` builds without it.
-
 ## Sample games
 
-Put your own dumps in `sourcerom/` under these names, then build all three:
+Put your own dumps in `sourcerom/` under these names, then build all of them:
 
 ```
 make samples
@@ -168,6 +165,34 @@ make samples
 
 The jump targets found so far by playing (`samples/<game>.entries.txt`) are
 copied into `build/<game>/` the first time a sample is built.
+
+### Banana Dash demo
+
+`sourcerom/bananadashdemo.nes`, Banana Dash demo. UxROM, 512K PRG, CHR RAM.
+Needs 848K of RAM (a RAM expansion).
+
+```
+make ROM=bananadashdemo
+make run ROM=bananadashdemo
+make discover ROM=bananadashdemo DISCOVER_PLAY=2 DISCOVER_SECS=120
+```
+
+Calls from the fixed bank into the switchable half go through the run-time
+lookup, so many jump targets only show up in play (`samples/` has 44).
+Headless play doesn't get into the first level; play it with `make run`.
+
+### Nova
+
+`sourcerom/nova.nes`, Nova. MMC1, 256K PRG, CHR RAM, 32K PRG RAM. Needs 720K
+of RAM (a RAM expansion).
+
+```
+make ROM=nova
+make run ROM=nova
+make discover ROM=nova
+```
+
+The jump targets found so far are in `samples/nova.entries.txt`.
 
 ### Super Mario Bros.
 

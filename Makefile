@@ -1,4 +1,4 @@
-# nes2msxtr: NROM / UxROM / MMC3 NES -> MSX turboR + V9990 (GFX9000) cartridge.
+# nes2msxtr: NROM / MMC1 / UxROM / MMC3 NES -> MSX turboR + V9990 (GFX9000) cartridge.
 #
 # ROM is a file name in sourcerom/ (with or without .nes) or a path:
 #   make ROM=contra                  translate sourcerom/contra.nes (a game you

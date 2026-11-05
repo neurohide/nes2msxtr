@@ -845,7 +845,7 @@ dj_hit: inc hl
         ld b, (hl)
         inc hl
         ld a, (hl)
-        ld h, b
+dj_hit2: ld h, b       ; (softmiss.tcl resumes here)
         ld l, c
         ld (dj_key), a
         pop af

@@ -9,9 +9,10 @@ proc nes2msx_crash {why} {
     global env
     set bad $env(NES2MSX_BADADDR)
     puts stderr "replay: $why"
-    puts stderr [format "  time %.3f s, pc=%04X sp=%04X bank=%d bad_addr=\$%04X" [machine_info time] \
+    puts stderr [format "  time %.3f s, pc=%04X sp=%04X bank=%d bad_addr=\$%04X bad_bank=%d" [machine_info time] \
         [reg pc] [reg sp] [debug read memory $env(NES2MSX_CURBANK)] \
-        [expr {[debug read memory $bad] | ([debug read memory [expr {$bad + 1}]] << 8)}]]
+        [expr {[debug read memory $bad] | ([debug read memory [expr {$bad + 1}]] << 8)}] \
+        [debug read memory $env(NES2MSX_BADBANK)]]
     puts stderr "  stack: [nes2msx_hex [reg sp] 32]"
     exit
 }

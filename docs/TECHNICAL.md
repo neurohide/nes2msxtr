@@ -1,6 +1,6 @@
 # nes2msxtr: technical notes
 
-Statically recompiles an NROM (mapper 0), UxROM (mapper 2) or MMC3 (mapper 4) NES game into an **MSX turboR cartridge**
+Statically recompiles an NROM (mapper 0), MMC1 (mapper 1), UxROM (mapper 2) or MMC3 (mapper 4) NES game into an **MSX turboR cartridge**
 (ASCII16 megaROM) that draws on a **V9990 / GFX9000** and plays through the PSG.
 Use it only on games you have the rights to port.
 
@@ -229,7 +229,7 @@ code bank and when forced into 2K banks (`--bank-kb 2`).
 
 These are reported in `report.txt` where detectable:
 
-- NROM, UxROM and MMC3 only. No other mappers, no SRAM, no MMC3 PRG mode 1.
+- NROM, MMC1, UxROM and MMC3 only. No other mappers, no battery saves, no MMC3 PRG mode 1. MMC1: PRG mode 3 only (16K banks, last fixed, like UxROM), up to 256K PRG; the 5-write serial port is followed by the tracer and emulated by the runtime.
 - MMC3: the IRQ handler runs right after the NMI rather than at its line,
   and a split shows from the next frame on. IRQs masked by I are dropped for
   that frame. CHR banks switched mid-frame are not shown per line.

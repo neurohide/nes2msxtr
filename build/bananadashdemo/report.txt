@@ -1,0 +1,42 @@
+input: sourcerom/bananadashdemo.nes
+UxROM, PRG 512K, CHR RAM, mirroring horizontal
+6502 instructions: 27668, jump tables: 0, dispatchers: 0, computed-jump sites: 3, lookup entries: 517
+stack: data only in page 1
+code banks: 7 (multi-bank)
+entry points from entries.txt: 44
+mapper segments used: 4..52 (848K RAM needed, more than the turboR's 512K: runs from a RAM expansion (memory mapper))
+runtime blob: $D700-$F3A2
+cartridge: bananadashdemo.rom, 1024K ASCII16
+warnings (32):
+  $E1F4: bank mapped at this call into $8000-$BFFF not known; not traced
+  $E1F7: bank mapped at this call into $8000-$BFFF not known; not traced
+  $E202: bank mapped at this call into $8000-$BFFF not known; not traced
+  $E205: bank mapped at this call into $8000-$BFFF not known; not traced
+  $E234: bank mapped at this call into $8000-$BFFF not known; not traced
+  $E25A: bank mapped at this call into $8000-$BFFF not known; not traced
+  $E26D: bank mapped at this call into $8000-$BFFF not known; not traced
+  $E40D: bank mapped at this call into $8000-$BFFF not known; not traced
+  $E545: bank mapped at this call into $8000-$BFFF not known; not traced
+  $E56B: bank mapped at this call into $8000-$BFFF not known; not traced
+  $E594: bank mapped at this call into $8000-$BFFF not known; not traced
+  $E5A6: bank mapped at this call into $8000-$BFFF not known; not traced
+  $E5D1: bank mapped at this call into $8000-$BFFF not known; not traced
+  $E8DA: bank mapped at this call into $8000-$BFFF not known; not traced
+  $E985: bank mapped at this call into $8000-$BFFF not known; not traced
+  $E9D1: bank mapped at this call into $8000-$BFFF not known; not traced
+  $E9E4: bank mapped at this call into $8000-$BFFF not known; not traced
+  $EBF0: bank mapped at this call into $8000-$BFFF not known; not traced
+  $EC75: bank mapped at this call into $8000-$BFFF not known; not traced
+  $ED44: bank mapped at this call into $8000-$BFFF not known; not traced
+  $EED9: bank mapped at this call into $8000-$BFFF not known; not traced
+  $EEE5: bank mapped at this call into $8000-$BFFF not known; not traced
+  $EEF0: bank mapped at this call into $8000-$BFFF not known; not traced
+  $F0F2: bank mapped at this call into $8000-$BFFF not known; not traced
+  $F148: bank mapped at this call into $8000-$BFFF not known; not traced
+  $F157: bank mapped at this call into $8000-$BFFF not known; not traced
+  $F280: bank mapped at this call into $8000-$BFFF not known; not traced
+  $F39E: bank mapped at this call into $8000-$BFFF not known; not traced
+  $F430: bank mapped at this call into $8000-$BFFF not known; not traced
+  $F96E: RTS at stack depth 1 not supported
+  inconsistent stack depth at $F939 (1 vs 2)
+  inconsistent stack depth at $F962 (2 vs 1)

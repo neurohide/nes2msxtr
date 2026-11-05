@@ -540,6 +540,8 @@ def _find_dispatch(code, engines, decode, mem, dbank={}):
         stride, limit = 1, 256
         if lo[0] == "tbl" and hi[0] == "tbl":
             if hi[1] == lo[1] + 1: stride, limit = 2, 128
+            elif hi[1] == lo[1]:        # LDA t,Y / INY / LDA t,Y: words in one table
+                stride, limit, hi = 2, 128, ("tbl", lo[1] + 1)
             elif hi[1] != lo[1]: limit = min(256, abs(hi[1] - lo[1]))
         out = []
         for i in range(limit):

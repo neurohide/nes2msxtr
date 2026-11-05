@@ -1,7 +1,13 @@
 # Game ROMs are never part of this project: put your own dumps here.
 sourcerom/*.nes
+!sourcerom/bananadashdemo.nes
 # Build output and caches
-build/
+build/*
+!build/bananadashdemo/
+build/bananadashdemo/*
+!build/bananadashdemo/bananadashdemo.rom
+!build/bananadashdemo/entries.txt
+!build/bananadashdemo/report.txt
 tools/__pycache__/
 testrom/*.o
 .DS_Store
