@@ -25,6 +25,10 @@ emulates the NES picture, sound and mapper on the MSX hardware.
 |---|---|---|
 | ![Super Mario Bros. on MSX turboR + GFX9000](docs/screenshots/supermariobros.png) | ![Contra on MSX turboR + GFX9000](docs/screenshots/contra.png) | ![Double Dragon II on MSX turboR + GFX9000](docs/screenshots/doubledragonii.png) |
 
+| Banana Dash demo | Nova |
+|---|---|
+| ![Banana Dash demo on MSX turboR + GFX9000](docs/screenshots/bananadashdemo.png) | ![Nova on MSX turboR + GFX9000](docs/screenshots/nova.png) |
+
 *These screenshots are samples that show the result of the translation: the
 cartridges nes2msxtr built from the ROMs listed below, running in openMSX on
 a Panasonic FS-A1GT (R800) with a GFX9000.*
