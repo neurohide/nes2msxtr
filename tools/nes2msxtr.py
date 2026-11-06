@@ -722,6 +722,9 @@ def emit_banks(banks, multi, cap=None, profile=None):
 
 
 # -- graphics / tables -----------------------------------------------------------
+# NES composite -> RGB: the standard NTSC YIQ decode formula from the
+# NESdev wiki (https://www.nesdev.org/wiki/PPU_palettes), not any one
+# emulator's code.
 def nes_palette():
     lo = [-0.12, 0.00, 0.31, 0.72]
     hi = [0.40, 0.68, 1.00, 1.00]
@@ -1018,7 +1021,7 @@ def build(rom_path, out_dir, crop, bank_kb, pad_kb=0, splash=None):
     main = [f'        include "config.asm"', f'        include "{RUNTIME}/defs.asm"',
             "        org $4000", f'        include "{RUNTIME}/boot.asm"', "blob_src:",
             "        org RUNTIME", "blob_start:"]
-    main += [f'        include "{RUNTIME}/{f}"' for f in ("core.asm", "ppu.asm", "apu.asm", "input.asm")]
+    main += [f'        include "{RUNTIME}/{f}"' for f in ("core.asm", "mapper.asm", "ppu.asm", "apu.asm", "input.asm")]
     main += ['        include "tables.asm"', "blob_end:",
              "        org blob_src + (blob_end - blob_start)", "        defs $8000 - $, $ff"]
     main += [f'        include "bank{i}.asm"' for i in range(len(banks))]
