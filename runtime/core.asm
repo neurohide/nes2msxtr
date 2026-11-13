@@ -13,7 +13,7 @@ endif
 
         call ram_find           ; the memory mapper to run from
         jp c, no_ram
-if MMC3_CHR
+if CHR_ROM_SWITCHED
         in a, (PPI_SLOT)        ; the cartridge (page 1 now): CHR ROM is read
         rrca                    ; from it when banks switch
         rrca
@@ -130,6 +130,10 @@ boot_init_state:
         ld (psg_mix), a
         ld a, $80
         ld (pad_shift), a
+if CHR_ROM_SWITCHED
+        ld a, 1                  ; load the mapper's initial CHR ROM banks
+        ld (chr_remap), a
+endif
         ld a, 1                 ; pulse 1 negates in ones' complement
         ld (APU + $20 + 6), a
         ret
@@ -953,12 +957,18 @@ rti_rt:
         jp dyn_jump
 rti_ret:
         pop af
+endif
+; RTI that ends an interrupt handler: back to int_run. The Z80 stack, the
+; code bank and the bank stack are restored to what they were at ir_call: a
+; handler that switched 6502 stacks or returned through rts_jump leaves
+; translated CALL frames (and cross-bank xret frames) behind.
+rti_go:
         ld hl, s6_ptr
         inc (hl)
         inc (hl)
         inc (hl)
-        ret
-endif
+        ld sp, (ir_sp)
+        jp ir_ret
 
 ; PLP: pull a 6502 status byte into carry, D (N/Z), vflag and p_id.
 ; Preserves A.
@@ -1194,7 +1204,7 @@ if MMC3 + MMC1
         call nt_refresh_all
 isr_mir:
 endif
-if MMC3_CHR
+if CHR_ROM_SWITCHED
         ld a, (chr_remap)       ; CHR banks switched since the last frame
         or a
         call nz, chr_remap_do
@@ -1316,6 +1326,12 @@ int_run:
         push af
         or 4
         ld (p_id), a
+        ld hl, (ir_sp)          ; rti_go restores these (see there)
+        push hl
+        ld hl, (bstk)
+        push hl
+        ld a, (cur_bank)
+        push af
         ld hl, (isr_sp)         ; reload DE, C, AF saved on isr entry
         ld de, 10
         add hl, de
@@ -1342,10 +1358,11 @@ if MMC3
         ld hl, (mm_sel)
         push hl
 endif
+        ld (ir_sp), sp
         ei
 ir_call:
         call 0
-        di
+ir_ret: di
 if MMC3
         pop hl
         ld a, (mm_sel)
@@ -1360,9 +1377,16 @@ endif
         pop hl
         ld (wr_val), hl
         pop af
+        call set_bank
+        pop hl
+        ld (bstk), hl
+        pop hl
+        ld (ir_sp), hl
+        pop af
         ld (p_id), a
         ret
 isr_sp: dw 0                    ; SP in the vblank isr after its pushes
+ir_sp:  dw 0                    ; SP at ir_call (rti_go returns through it)
 
 
 ; Split-screen line interrupt: switch to the below-split scroll.

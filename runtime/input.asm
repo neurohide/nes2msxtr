@@ -93,16 +93,36 @@ key_row:
 io_w_4016:
         push af
         bit 0, l
-        jr z, w4016_r
+        jr z, w4016_low
+        ld a, 1
+        ld (pad_strobe), a
+        jr w4016_done
+w4016_low:
+        ld a, (pad_strobe)
+        or a
+        jr z, w4016_done
+        xor a
+        ld (pad_strobe), a
         call read_pad
         ld (pad_shift), a
-w4016_r:
+w4016_done:
         pop af
         ret
 
-; Serial read: bit 0 = next button, $40 = open bus; 1s after 8 reads.
+; While strobing, bit 0 follows A live. Otherwise read the latched buttons
+; serially: bit 0 = next button, $40 = open bus; 1s after 8 reads.
 io_r_4016:
         push af
+        ld a, (pad_strobe)
+        or a
+        jr z, r4016_shift
+        call read_pad
+        and 1
+        or $40
+        ld l, a
+        pop af
+        ret
+r4016_shift:
         ld a, (pad_shift)
         scf
         rra

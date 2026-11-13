@@ -19,6 +19,7 @@
 #                                    40 s first, for games with an intro and menus)
 #   make test                        end-to-end check with the bundled test ROM
 #   make deps                        install the tools needed (tools/deps.sh)
+#   make itch VERSION=1.0            zip the tool (no ROMs) into dist/ for itch.io
 
 ROM ?= testrom/testrom.nes
 SOURCEROM ?= sourcerom
@@ -119,6 +120,10 @@ replay:
 
 OPENMSX ?= $(firstword $(wildcard /Applications/openMSX.app/Contents/MacOS/openmsx) openmsx)
 
+# Zip the tool itself (no ROMs) for itch.io, into dist/.
+itch:
+	python3 tools/package_tool.py $(VERSION)
+
 clean:
 	rm -rf build
 
@@ -126,4 +131,4 @@ clean:
 deps:
 	tools/deps.sh
 
-.PHONY: all deps samples test test-testrom test-stacktest test-uxtest test-mmc3 test-ramext profile discover run replay clean
+.PHONY: all deps samples test test-testrom test-stacktest test-uxtest test-mmc3 test-ramext profile discover run replay itch clean

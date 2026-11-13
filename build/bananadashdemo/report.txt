@@ -5,7 +5,7 @@ stack: data only in page 1
 code banks: 7 (multi-bank)
 entry points from entries.txt: 44
 mapper segments used: 4..52 (848K RAM needed, more than the turboR's 512K: runs from a RAM expansion (memory mapper))
-runtime blob: $D700-$F3A2
+runtime blob: $D700-$F3C4
 cartridge: bananadashdemo.rom, 1024K ASCII16
 warnings (32):
   $E1F4: bank mapped at this call into $8000-$BFFF not known; not traced

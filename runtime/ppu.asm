@@ -285,7 +285,7 @@ ppu_peek:
         ld l, (hl)
         ret
 pk_chr:
-if MMC3_CHR
+if CHR_ROM_SWITCHED
         ld a, (chr_remap)       ; banks switched since the last frame: the
         or a                    ; copy must show them now (games read CHR
         jr z, pk_now            ; ROM data through $2007)
@@ -405,15 +405,14 @@ pal_set:
         ei
         ret
 
-if MMC3_CHR
-; MMC3 CHR banks: copy each 1K piece whose bank changed into the CHR copy
-; in DSEG_MISC and mark its 64 tiles for chr_flush. R0/R1 are 2K banks at
-; $0000 ($1000 with $8000 bit 7 set), R2-R5 1K banks at $1000 ($0000).
-; CHR ROM stays in the cartridge (1K bank b in ROM bank CHR_BANK0 + b / 16),
-; read with page 1 switched to it. Interrupts off.
+if CHR_ROM_SWITCHED
+; Copy changed 1K CHR ROM slots into DSEG_MISC and mark their 64 tiles for
+; chr_flush. CHR ROM stays in the cartridge, read with page 1 switched to it.
+; Interrupts off.
 chr_remap_do:
         xor a
         ld (chr_remap), a
+if MMC3_CHR
         ld hl, mm_regs
         ld a, (mm_sel)
         rla
@@ -442,6 +441,59 @@ cr_1k:  ld a, (hl)
         ld (de), a
         inc de
         djnz cr_1k
+else
+if MMC1_CHR
+        ld a, (m1_control)
+        bit 4, a
+        jr nz, cr_m1_4k
+        ld a, (m1_chr_r0)
+        srl a
+        and (CHR_MASK + 1) / 8 - 1
+        add a, a
+        add a, a
+        add a, a
+        ld c, a
+        ld hl, cr_new
+        ld b, 8
+cr_m1_8k:
+        ld a, c
+        and CHR_MASK
+        ld (hl), a
+        inc c
+        inc hl
+        djnz cr_m1_8k
+        jr cr_m1_ready
+cr_m1_4k:
+        ld a, (m1_chr_r0)
+        and (CHR_MASK + 1) / 4 - 1
+        add a, a
+        add a, a
+        ld c, a
+        ld hl, cr_new
+        ld b, 4
+cr_m1_lo:
+        ld a, c
+        and CHR_MASK
+        ld (hl), a
+        inc c
+        inc hl
+        djnz cr_m1_lo
+        ld a, (m1_chr_r1)
+        and (CHR_MASK + 1) / 4 - 1
+        add a, a
+        add a, a
+        ld c, a
+        ld b, 4
+cr_m1_hi:
+        ld a, c
+        and CHR_MASK
+        ld (hl), a
+        inc c
+        inc hl
+        djnz cr_m1_hi
+cr_m1_ready:
+endif
+endif
         ld c, 0                 ; C = slot, B = 0
 cr_l:   ld hl, cr_new
         add hl, bc

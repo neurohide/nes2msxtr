@@ -123,8 +123,7 @@ endif
 if MMC1
 ; MMC1 serial port: H = NES address high byte, L = value. Bit 7 resets
 ; the shift register; the 5th write loads the register H selects. Only
-; PRG mode 3 (16K at $8000, the last bank fixed) and CHR RAM / one 8K CHR
-; ROM bank. Preserves AF, BC, DE.
+; PRG mode 3 (16K at $8000, the last bank fixed). Preserves AF, BC, DE.
 m1_wr:
         push af
         ld a, i                 ; atomic, as mapper_w
@@ -149,7 +148,8 @@ m1_wr:
         rrca
         and $1F
         ld l, a                 ; L = register value
-        ld a, h                 ; address bits 14-13: the register
+        ld a, h                 ; address bits 15-13: the register
+        rlca
         rlca
         rlca
         and 3
@@ -157,7 +157,8 @@ m1_wr:
         dec a
         jr z, m1_chr0
         dec a
-        call nz, mapper_w       ; $E000: PRG bank ($C000: CHR bank 1, unused)
+        jr z, m1_chr1
+        call mapper_w           ; $E000: PRG bank
 m1_rst: xor a
         ld (m1_cnt), a
         ld (m1_sr), a
@@ -170,6 +171,17 @@ m1_di:  pop af
 ; Control: mirroring (one-screen modes are not supported). It applies
 ; to $2007 at once; the V9990 map is rebuilt at vblank.
 m1_ctrl:
+if MMC1_CHR
+        ld a, (m1_control)
+        xor l
+        and $10
+        jr z, m1_ctrl_mode
+        ld a, 1
+        ld (chr_remap), a
+m1_ctrl_mode:
+        ld a, l
+        ld (m1_control), a
+endif
         ld a, l
         and 3
         cp 2
@@ -184,6 +196,12 @@ m1_ctrl:
         jr m1_rst
 ; CHR bank 0: on SOROM / SXROM also the PRG RAM bank
 m1_chr0:
+if MMC1_CHR
+        ld a, l
+        ld (m1_chr_r0), a
+        ld a, 1
+        ld (chr_remap), a
+endif
 if WRAM_MASK
         ld a, l
         rrca
@@ -196,6 +214,18 @@ endif
 endif
         jr m1_rst
 
+m1_chr1:
+if MMC1_CHR
+        ld a, l
+        ld (m1_chr_r1), a
+        ld a, 1
+        ld (chr_remap), a
+endif
+        jr m1_rst
+
+m1_control: db $0C              ; MMC1 power-on default: mode 3, 8K CHR
+m1_chr_r0:  db 0
+m1_chr_r1:  db 0
 m1_sr:      db 0                ; shift register (bits 7-3 after 5 writes)
 m1_cnt:     db 0                ; writes so far
 endif

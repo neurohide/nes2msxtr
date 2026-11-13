@@ -54,7 +54,7 @@ Check yours with `shasum -a 1 sourcerom/*.nes`.
 | Mapper | Name | PRG | CHR | Notes |
 |---|---|---|---|---|
 | 0 | NROM | 16K / 32K | 8K ROM or RAM | Sprite-0 split screens |
-| 1 | MMC1 | 16K banks at `$8000`, last one fixed (PRG mode 3), up to 256K | 8K RAM | PRG RAM at `$6000` (up to 32K) |
+| 1 | MMC1 | 16K banks at `$8000`, last one fixed (PRG mode 3), up to 256K | 8K RAM or up to 128K switched ROM | PRG RAM at `$6000` (up to 32K) |
 | 2 | UxROM | 16K banks, the last one fixed | 8K RAM | |
 | 4 | MMC3 | 8K banks at `$8000` / `$A000`, last 16K fixed (PRG mode 0) | 1K / 2K ROM banks, or 8K RAM | Scanline IRQ splits, `$A000` mirroring |
 
@@ -268,7 +268,12 @@ make test                 # translate the test ROMs and compare their RAM with
                           # a reference 6502 run, in openMSX
 make clean                # remove build/ (entries.txt included)
 make deps                 # install the build tools and openMSX (tools/deps.sh)
+make itch VERSION=1.0     # zip the tool (no ROMs) into dist/ for itch.io
 ```
+
+Windows install, generating a ROM, the NROM happy path, and the
+discover/crash/replay workflow for other mappers:
+[docs/ITCH.md](docs/ITCH.md).
 
 ## How it works
 

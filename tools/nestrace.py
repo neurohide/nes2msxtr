@@ -19,6 +19,8 @@ targets of computed jumps that were only seen at run time):
             inline .word table that follows each JSR to them)
   inline    routines that pop their return address, read the zero-terminated
             data that follows each JSR to them and JMP (ptr) past it
+  inline_fixed  routine -> n: routines that move their return address past
+            the n bytes that follow each JSR to them (TSX, STA $0101,X)
   inline_cont  JSR site -> where such a call continues (after the data)
   tables    JSR-site -> [case addresses]
   pushed    return addresses (+ 1) pushed by hand with LDA #imm / PHA
@@ -65,6 +67,7 @@ for _m, _codes in {
  "RTI": [(0x40, "imp")], "RTS": [(0x60, "imp")],
  "SBC": [(0xE9, "imm"), (0xE5, "zp"), (0xF5, "zpx"), (0xED, "abs"), (0xFD, "abx"), (0xF9, "aby"), (0xE1, "izx"), (0xF1, "izy")],
  "STA": [(0x85, "zp"), (0x95, "zpx"), (0x8D, "abs"), (0x9D, "abx"), (0x99, "aby"), (0x81, "izx"), (0x91, "izy")],
+ "SHY": [(0x9C, "abx")],
  "TXS": [(0x9A, "imp")], "TSX": [(0xBA, "imp")], "PHA": [(0x48, "imp")], "PLA": [(0x68, "imp")],
  "PHP": [(0x08, "imp")], "PLP": [(0x28, "imp")],
  "STX": [(0x86, "zp"), (0x96, "zpy"), (0x8E, "abs")], "STY": [(0x84, "zp"), (0x94, "zpx"), (0x8C, "abs")],
@@ -75,8 +78,22 @@ for _m, _codes in {
 # and the SBC #imm duplicate. Only decoded where a branch jumps over just
 # their opcode byte, or right after another of them, so data doesn't turn
 # into code
-UNOFFICIAL = (0x80, 0x82, 0x89, 0xC2, 0xE2, 0xEB)
-for _c in UNOFFICIAL[:-1]: OPS[_c] = ("NOP", "imm")
+UNOFFICIAL = (0x1A, 0x3A, 0x5A, 0x7A, 0x80, 0x82, 0x89, 0x93, 0xC2, 0xDA, 0xE2, 0xEB, 0xFA,
+              0x1B, 0x1C, 0x3C, 0x5C, 0x7C, 0xDC, 0xFC,
+              0x04, 0x0C, 0x14, 0x34, 0x44, 0x54, 0x64, 0x74, 0xD4, 0xF4,
+              0x63, 0x67, 0x6F, 0x73, 0x77, 0x7B, 0x7F)
+UNOFFICIAL_FLOW = (0x93, 0x9C)
+for _c in (0x80, 0x82, 0x89, 0xC2, 0xE2): OPS[_c] = ("NOP", "imm")
+for _c in (0x1A, 0x3A, 0x5A, 0x7A, 0xDA, 0xFA): OPS[_c] = ("NOP", "imp")
+for _c in (0x1C, 0x3C, 0x5C, 0x7C, 0xDC, 0xFC): OPS[_c] = ("NOP", "abx")
+OPS[0x0C] = ("NOP", "abs")
+for _c in (0x04, 0x44, 0x64): OPS[_c] = ("NOP", "zp")
+for _c in (0x14, 0x34, 0x54, 0x74, 0xD4, 0xF4): OPS[_c] = ("NOP", "zpx")
+OPS[0x1B] = ("SLO", "aby")
+for _c, _mode in ((0x63, "izx"), (0x67, "zp"), (0x6F, "abs"), (0x73, "izy"),
+                  (0x77, "zpx"), (0x7B, "aby"), (0x7F, "abx")):
+    OPS[_c] = ("RRA", _mode)
+OPS[0x93] = ("AHX", "izy")
 OPS[0xEB] = ("SBC", "imm")
 SKIPS = ("BIT", "NOP")      # may hide the next instruction in their operand
 
@@ -211,10 +228,12 @@ def trace(prg, kind="nrom", extra=()):
         P.vectors["NMI"] = P.vectors["RESET"]  # fallback: same as RESET
 
     P.engines, P.tables = set(), {}
-    P.inline, P.inline_cont = set(), {}
+    P.inline, P.inline_fixed, P.inline_cont = set(), {}, {}
 
     def data_end(site):
         """the address after the zero byte that ends the data after JSR site"""
+        n = P.inline_fixed.get(mem.at(site, rw(site + 1)))
+        if n is not None: return canon(site + 3 + n)
         for k in range(3, 259):
             b = canon(site + k)
             if not inrom(b): return None
@@ -234,7 +253,7 @@ def trace(prg, kind="nrom", extra=()):
             imm = prev = None
             after_skip = False
             while inrom(a) and a not in code:
-                d = decode(a) if rd(a) not in UNOFFICIAL or a in unoff else None
+                d = decode(a) if rd(a) not in UNOFFICIAL or a in unoff or a in labels or a in entries else None
                 if d is None:
                     warns.append(f"invalid opcode ${rd(a):02X} at ${a:04X} (path from ${start:04X})"); break
                 n, m, mode, arg = d
@@ -248,7 +267,7 @@ def trace(prg, kind="nrom", extra=()):
                 code[a] = d
                 if after_skip: soft.add(a)
                 after_skip = m in SKIPS
-                if rd(a) in UNOFFICIAL: unoff.add(nxt(a, n))
+                if rd(a) in UNOFFICIAL or rd(a) in UNOFFICIAL_FLOW: unoff.add(nxt(a, n))
                 if mode == "rel" and branch_target(a, arg) == nxt(a, 3): unoff.add(nxt(a, 2))
                 if mode == "rel":
                     t = branch_target(a, arg); labels.add(t); work.append(t)
@@ -256,6 +275,12 @@ def trace(prg, kind="nrom", extra=()):
                     for t in targets(a, arg):
                         labels.add(t); work.append(t)
                         if m == "JSR": calls.add(t)
+                if m == "BRK" and mem.mmc1:
+                    # The MMC1 IRQ handler advances the stacked PC past the
+                    # BRK signature byte before RTI, so continue after it.
+                    t = canon(a + 2)
+                    labels.add(t); work.append(t)
+                    break
                 if m in ENDS_FLOW: break
                 # LDx #imm followed by a branch on Z/N is unconditional
                 if mode == "rel" and imm is not None and (
@@ -266,7 +291,7 @@ def trace(prg, kind="nrom", extra=()):
                 if mode == "rel" and prev == OPPOSITE[m]: nofall.add(a); break
                 prev = m if mode == "rel" else None
                 imm = arg if (mode == "imm" and m in ("LDA", "LDX", "LDY")) else None
-                if m == "JSR" and mem.at(a, arg) in P.inline:
+                if m == "JSR" and (mem.at(a, arg) in P.inline or mem.at(a, arg) in P.inline_fixed):
                     c = data_end(a)
                     if c is not None:
                         P.inline_cont[a] = c; labels.add(c); work.append(c)
@@ -315,6 +340,31 @@ def trace(prg, kind="nrom", extra=()):
             if m not in ENDS_FLOW: work.append(nxt(a, n))
         return False
 
+    def inline_skip(code, t):
+        """TSX, then LDA #n ... STA $0101,X (or $0103,X inside a helper the
+        routine calls): the return address is moved past n inline bytes.
+        -> n, or None"""
+        a, tsx, imm, back = t, False, None, None
+        for _ in range(64):
+            if a not in code: return None
+            n, m, mode, arg = code[a]
+            if m == "TSX": tsx = True
+            elif m == "LDA" and mode == "imm": imm = arg
+            elif m == "STA" and mode == "abx" and tsx and imm and arg == (0x0103 if back else 0x0101):
+                return imm
+            elif m == "JSR" and back is None and mem.at(a, arg) is not None:
+                back, a = nxt(a, n), mem.at(a, arg)
+                continue
+            elif m == "RTS" and back is not None:
+                a, back = back, None
+                continue
+            elif m == "JMP" and mode == "abs" and mem.at(a, arg) is not None:
+                a = mem.at(a, arg)
+                continue
+            elif m in ENDS_FLOW: return None
+            a = nxt(a, n)
+        return None
+
     roots = [P.vectors["NMI"], P.vectors["RESET"]]
     if (mem.mmc3 or mem.mmc1) and inrom(P.vectors["IRQ"]): roots.append(P.vectors["IRQ"])   # scanline IRQ / BRK
     P.roots = roots
@@ -340,6 +390,11 @@ def trace(prg, kind="nrom", extra=()):
         ramcode = _ram_copies(code, mem)
         engines = P.engines | {t for t in calls if is_engine(code, t)}
         inline = P.inline | {t for t in calls if t not in engines and is_inline(code, t)}
+        inline_fixed = dict(P.inline_fixed)
+        for t in calls:
+            if t not in engines and t not in inline and t not in inline_fixed:
+                n = inline_skip(code, t)
+                if n: inline_fixed[t] = n
         tables = {}
         for c in sorted(a for a, d in code.items() if d[1] == "JSR" and mem.at(a, d[3]) in engines):
             t, tg = nxt(c, 3), []
@@ -367,10 +422,11 @@ def trace(prg, kind="nrom", extra=()):
                 new[site] = bk if n is None else n if bk is None else n | bk
         if engines == P.engines and tables == P.tables and dispatch == P.dispatch \
                 and xbank == P.xbank and dbank == P.dbank and pushed <= P.pushed \
-                and ramcode == P.ramcode and inline == P.inline and (mem.wram_code or wram) == mem.wram_code: break
+                and ramcode == P.ramcode and inline == P.inline and inline_fixed == P.inline_fixed \
+                and (mem.wram_code or wram) == mem.wram_code: break
         P.engines, P.tables, P.dispatch, P.xbank, P.dbank = engines, tables, dispatch, xbank, dbank
         P.pushed |= pushed
-        P.ramcode, P.inline = ramcode, inline
+        P.ramcode, P.inline, P.inline_fixed = ramcode, inline, inline_fixed
         mem.wram_code = mem.wram_code or wram      # once found, kept
 
     for tg in P.tables.values(): labels.update(tg)
@@ -1033,39 +1089,60 @@ def _stack_depth(P):
     TXS after TSX in the same flow restores the depth TSX saw (P.txs_restore).
     """
     code = P.code
-    depth, P.txs_restore = {}, set()
-    work = [(r, 0, None) for r in P.roots]
-    work += [(t, 0, None) for t in P.calls]
-    work += [(t, 0, None) for t in sorted(P.extra)]     # entered by calls found at run time
+    depth, P.txs_restore, P.stack_switch_rts = {}, set(), set()
+    P.stack_switch_code = set()
+    work = [(r, 0, None, False) for r in P.roots]
+    work += [(t, 0, None, False) for t in P.calls]
+    # Runtime-discovered targets have no translated Z80 CALL frame. They
+    # return through the emulated 6502 stack even when the target is reached
+    # after an earlier stack switch.
+    work += [(t, 0, None, True) for t in sorted(P.extra)]
     mem = P.mem
     while work:
-        a, d, sx = work.pop()
+        a, d, sx, switched = work.pop()
         while a in code:
             if a in depth:
-                if depth[a] != d:
+                if switched:
+                    P.stack_switch_code.add(a)
+                if depth[a] != d and not switched and a not in P.stack_switch_code:
                     P.warnings.append(f"inconsistent stack depth at ${a:04X} ({depth[a]} vs {d})")
                 break
             depth[a] = d
+            if switched: P.stack_switch_code.add(a)
             n, m, mode, arg = code[a]
             if m in ("PHA", "PHP"): d += 1
             elif m in ("PLA", "PLP"): d -= 1
             elif m == "TSX": sx = d
-            elif m == "TXS" and sx is not None: d = sx; P.txs_restore.add(a)
-            if mode == "rel": work.append((branch_target(a, arg), d, sx))
+            elif m == "TXS":
+                if sx is not None:
+                    d = sx; P.txs_restore.add(a)
+                else:
+                    # TXS has selected a separate 6502 stack. Its current
+                    # height is unrelated to the caller's tracked frame.
+                    d = 0
+                    switched = True
+            elif m in ("TAX", "INX", "DEX", "LDX", "PLX"):
+                sx = None
+            if m == "RTS" and switched:
+                P.stack_switch_rts.add(a)
+            if mode == "rel": work.append((branch_target(a, arg), d, sx, switched))
             if m == "JMP" and mode == "abs":
                 v = mem.at(a, arg)
                 tg = [v] if v is not None else [mem.banked(arg, b) for b in P.xbank.get(a) or ()]
-                work += [(t, d, sx) for t in tg]
+                work += [(t, d, sx, switched) for t in tg]
             if a in P.dispatch:
                 # RTS-trick: the two pushed bytes are consumed by the jump
-                work += [(t, d - 2 if m == "RTS" else d, None) for t in P.dispatch[a]]
+                work += [(t, d - 2 if m == "RTS" else d, None, False) for t in P.dispatch[a]]
+            if m == "BRK" and mem.mmc1:
+                work.append((canon(a + 2), d, sx, switched))
+                break
             if m in ENDS_FLOW or a in P.nofall: break
             if m == "JSR" and mem.at(a, arg) in P.engines:
                 # cases run at the dispatch site's depth (the engine pops its own return)
-                work += [(t, d, None) for t in P.tables.get(a, [])]
+                work += [(t, d, None, False) for t in P.tables.get(a, [])]
                 break
             if a in P.inline_cont:
-                work.append((P.inline_cont[a], d, sx))
+                work.append((P.inline_cont[a], d, sx, switched))
                 break
             a = nxt(a, n)
     P.depth = depth

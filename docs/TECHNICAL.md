@@ -229,7 +229,7 @@ code bank and when forced into 2K banks (`--bank-kb 2`).
 
 These are reported in `report.txt` where detectable:
 
-- NROM, MMC1, UxROM and MMC3 only. No other mappers, no battery saves, no MMC3 PRG mode 1. MMC1: PRG mode 3 only (16K banks, last fixed, like UxROM), up to 256K PRG; the 5-write serial port is followed by the tracer and emulated by the runtime.
+- NROM, MMC1, UxROM and MMC3 only. No other mappers, no battery saves, no MMC3 PRG mode 1. MMC1: PRG mode 3 only (16K banks, last fixed, like UxROM), up to 256K PRG; CHR ROM supports 4K / 8K switching up to 128K. CHR RAM is one 8K bank. The 5-write serial port is followed by the tracer and emulated by the runtime.
 - MMC3: the IRQ handler runs right after the NMI rather than at its line,
   and a split shows from the next frame on. IRQs masked by I are dropped for
   that frame. CHR banks switched mid-frame are not shown per line.

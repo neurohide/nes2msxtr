@@ -57,7 +57,7 @@ def flag_liveness(P):
         elif mode == "rel":
             s = [nestrace.branch_target(a, arg)] + ([] if a in P.nofall else [nestrace.nxt(a, n)])
         elif m not in nestrace.ENDS_FLOW and not (m == "JSR" and P.mem.at(a, arg) in P.engines):
-            s = [nestrace.nxt(a, n)]
+            s = [P.inline_cont.get(a, nestrace.nxt(a, n))]
         if any(t not in code for t in s): opaque.add(a)
         succ[a] = [t for t in s if t in code]
 
@@ -288,6 +288,10 @@ class Translator:
         if a in self.unwind:
             return ["; leaves the routine the NMI interrupted"] + \
                 ((["ld hl,s6_ptr", "inc (hl)", "inc (hl)"]) if self.faithful else []) + ["jp nmi_rts"]
+        if m == "RTS" and a in self.P.stack_switch_rts:
+            # TXS selected a different 6502 stack, so Z80 RET would return
+            # through the caller's frame instead of this stack's return PC.
+            return ["jp rts_jump"]
         if m == "RTS" and d == 2:
             # PHA/PHA/RTS: jump to the pushed address + 1
             if a not in self.P.dispatch:
@@ -296,7 +300,7 @@ class Translator:
         if m == "RTS" and (d > 0 or d % 2):     # -2k: k return frames dropped
             self.warn.append(f"${a:04X}: RTS at stack depth {d} not supported")
         if m == "RTI" and self.mem.mmc1: return ["jp rti_rt"]
-        if m == "RTI": return ["ld hl,s6_ptr", "inc (hl)", "inc (hl)", "inc (hl)", "ret"]
+        if m == "RTI": return ["jp rti_go"]
         return (["ld hl,s6_ptr", "inc (hl)", "inc (hl)"] if self.faithful else []) + ["ret"]
 
     def rts_depth(self, a):
@@ -375,9 +379,29 @@ class Translator:
             else: inner += ["and l", "ld d,a"]
             if self.v_used: inner += ["ld a,l", "and $40", "ld (vflag),a"]
             if inner: L += ["push af"] + inner + ["pop af"]
-        elif m in ("STA", "STX", "STY"):
-            reg = {"STA": "a", "STX": "c", "STY": "e"}[m]
+        elif m == "AHX":
+            lines, _, _ = self.addr(mode, arg)
+            L += lines + ["push af", "ld b,a", "ld a,c", "and b", "ld b,a",
+                          "ld a,h", "inc a", "and b", "ld (wr_val),a", "pop af", "call mem_wr_v"]
+        elif m == "SLO":
             lines, kind, v = self.addr(mode, arg)
+            if kind == "ram_abs": lines = [f"ld hl,{v}"]
+            L += lines + ["push hl", "call mem_rd", "sla l", "ld d,l",
+                          "ld (wr_val),hl", "pop hl", "call mem_wr_v",
+                          "push af", "or d", "ld l,a", "pop af", "ld a,l", "ld d,a"]
+            self.zs = True
+        elif m == "RRA":
+            lines, kind, v = self.addr(mode, arg)
+            if kind == "ram_abs": lines = [f"ld hl,{v}"]
+            L += lines + ["push hl", "call mem_rd", "rr l", "ld d,l", "ld (wr_val),hl",
+                          "pop hl", "call mem_wr_v", "adc a,d"] + self.vcap(); nz(); self.zs = not self.v_used
+        elif m in ("STA", "STX", "STY", "SHY"):
+            reg = {"STA": "a", "STX": "c", "STY": "e", "SHY": "e"}[m]
+            lines, kind, v = self.addr(mode, arg)
+            if m == "SHY":
+                L += ["push af", "ld a,e", f"and {(arg >> 8) + 1 & 0xFF}",
+                      "ld (wr_val),a", "pop af"] + lines + ["call mem_wr_v"]
+                return L, True
             if kind == "ram_abs":
                 L += [f"ld ({v}),a"] if reg == "a" else [f"ld hl,{v}", f"ld (hl),{reg}"]
             elif kind == "ram_hl": L += lines + [f"ld (hl),{reg}"]
@@ -529,10 +553,11 @@ class Translator:
             n = self.P.code[a][0]
             if a in self.P.skips:       # BIT skip trick: continue past its operand
                 lines, ft = lines + [("JP", nestrace.nxt(a, n))], False
-            elif ft and a not in self.P.nofall and nestrace.nxt(a, n) != after[a]:
+            elif ft and a not in self.P.nofall and self.P.inline_cont.get(a, nestrace.nxt(a, n)) != after[a]:
                 # the next instruction isn't next in address order: into the
-                # other 8K slot, or overlapping code (2-byte NOP tricks)
-                lines, ft = lines + [("JP", nestrace.nxt(a, n))], False
+                # other 8K slot, overlapping code (2-byte NOP tricks), or
+                # inline data after a JSR
+                lines, ft = lines + [("JP", self.P.inline_cont.get(a, nestrace.nxt(a, n)))], False
             out.append((a, lines, ft))
             prev_end = nestrace.nxt(a, self.P.code[a][0])
         return out
@@ -862,19 +887,22 @@ def build(rom_path, out_dir, crop, bank_kb, pad_kb=0, splash=None):
     if kind is None: sys.exit(f"mapper {mapper} not supported (NROM, UxROM, MMC1 and MMC3 only)")
     ux, mmc3 = kind != "nrom", kind == "mmc3"
     prg_n, chr_n = rom[4], rom[5]
-    if kind != "mmc3" and chr_n > 1: sys.exit("multiple CHR banks not supported")
+    if kind not in ("mmc1", "mmc3") and chr_n > 1: sys.exit("multiple CHR banks not supported")
+    if kind == "mmc1" and chr_n > 16: sys.exit("MMC1 with more than 128K CHR is not supported")
     if kind == "mmc1" and prg_n > 16: sys.exit("MMC1 with more than 256K PRG (SUROM) not supported")
     if ux and (prg_n < 2 or prg_n & (prg_n - 1)): sys.exit(f"{kind} with {prg_n} PRG banks not supported")
     if not ux and prg_n not in (1, 2): sys.exit(f"NROM with {prg_n} PRG banks")
     if chr_n & (chr_n - 1): sys.exit(f"{chr_n} CHR banks not supported")
     chr_ram = chr_n == 0
     mmc3_chr = mmc3 and not chr_ram         # CHR ROM switched in 1K / 2K pieces
+    mmc1_chr = kind == "mmc1" and chr_n > 1  # CHR ROM switched in 4K / 8K pieces
+    chr_rom_switched = mmc3_chr or mmc1_chr
     trainer = 512 if rom[6] & 4 else 0
     prg_off = 16 + trainer
     prg = rom[prg_off: prg_off + prg_n * 0x4000]
     chr_off = prg_off + prg_n * 0x4000
     chr_rom = rom[chr_off: chr_off + chr_n * 0x2000]
-    chr_ = bytes(0x2000) if chr_ram or mmc3_chr else chr_rom[:0x2000]
+    chr_ = bytes(0x2000) if chr_ram or chr_rom_switched else chr_rom[:0x2000]
     if len(chr_) < 0x2000:
         chr_ = chr_ + bytes(0x2000 - len(chr_))
         print(f"warning: CHR data is only {len(chr_)} bytes; padded with zeros", file=sys.stderr)
@@ -922,6 +950,10 @@ def build(rom_path, out_dir, crop, bank_kb, pad_kb=0, splash=None):
     nmi, reset = P.vectors["NMI"], P.vectors["RESET"]
     dyn = {t for tg in P.tables.values() for t in tg} | {t for tg in P.dispatch.values() for t in tg} \
         | set(P.calls) | {nmi, reset} | P.extra | P.pushed | set(P.inline_cont.values())
+    # where each JSR continues: an RTS reached through a runtime-discovered
+    # target returns through the 6502 stack (rts_jump)
+    dyn |= {P.inline_cont.get(a, nestrace.nxt(a, n)) for a, (n, m, _, arg) in P.code.items()
+            if m == "JSR" and P.mem.at(a, arg) not in P.engines}
     for site, bk in P.xbank.items():
         dyn |= {P.mem.banked(P.code[site][3], b) for b in bk or ()}
     dyn = [t for t in dyn if t in bank_of]
@@ -931,10 +963,9 @@ def build(rom_path, out_dir, crop, bank_kb, pad_kb=0, splash=None):
     d_dyn, dyn_org = (d_misc, 0xA000) if dyn_size <= 0x2000 else (add("dyn"), 0x8000)
     if dyn_size > 0x4000: sys.exit(f"{len(dyn)} computed-jump targets: lookup table too large")
     nsegs = len(segs)               # copied into mapper RAM at boot
-    # MMC3 CHR ROM: only in the cartridge (ROM bank = segment - SEG_BASE + 1),
-    # read from there when banks switch
+    # Switched CHR ROM stays in the cartridge (ROM bank = segment - SEG_BASE + 1).
     chr_bank0 = 1 + nsegs
-    for i in range(len(chr_rom) // 0x4000 if mmc3_chr else 0): segs.append(f"chr{i}")
+    for i in range(len(chr_rom) // 0x4000 if chr_rom_switched else 0): segs.append(f"chr{i}")
     bg_bank = 1 + len(segs)
     ram_k = (SEG_BASE + nsegs) * 16
     if SEG_BASE + nsegs > 255:
@@ -946,7 +977,7 @@ def build(rom_path, out_dir, crop, bank_kb, pad_kb=0, splash=None):
     sp = spr_src(chr_)
     w("spr0.bin", sp[:0x4000]); w("spr1.bin", sp[0x4000:])
     w("chr.bin", chr_)
-    for i in range(len(chr_rom) // 0x4000 if mmc3_chr else 0): w(f"chr{i}.bin", chr_rom[i * 0x4000: (i + 1) * 0x4000])
+    for i in range(len(chr_rom) // 0x4000 if chr_rom_switched else 0): w(f"chr{i}.bin", chr_rom[i * 0x4000: (i + 1) * 0x4000])
     w("bg.bin", bg_vram(chr_))
     if splash: w("splash.bin", splash_bin(splash))
     for i, f in enumerate(files): w(f"bank{i}.asm", f)
@@ -979,7 +1010,8 @@ def build(rom_path, out_dir, crop, bank_kb, pad_kb=0, splash=None):
         f"WRAM_SHIFT: equ {3 if wram_banks == 2 else 2}",
         f"PRG_MASK: equ {len(prg) // P.mem.unit - 1}",
         f"CHR_RAM: equ {int(chr_ram)}", f"MMC3_CHR: equ {int(mmc3_chr)}",
-        f"CHR_SHADOW: equ {int(chr_ram or mmc3_chr)}", f"CHR_BANK0: equ {chr_bank0}",
+        f"MMC1_CHR: equ {int(mmc1_chr)}", f"CHR_ROM_SWITCHED: equ {int(chr_rom_switched)}",
+        f"CHR_SHADOW: equ {int(chr_ram or chr_rom_switched)}", f"CHR_BANK0: equ {chr_bank0}",
         f"CHR_MASK: equ {max(1, len(chr_rom) // 0x400) - 1}", f"FAITHFUL: equ {int(T.faithful)}",
         f"RAM_SEGS: equ {SEG_BASE + nsegs}", f"DEFER_DMA: equ {int(bool(T.polls))}",
         f"RESET_BANK: equ {bank_of[reset]}", f"SPLASH: equ {int(bool(splash))}",
