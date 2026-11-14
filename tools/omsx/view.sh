@@ -23,3 +23,5 @@ fi
 export NES2MSX_REPLAY="$(cd "$(dirname "$REPLAY")" && pwd)/$(basename "$REPLAY")"
 "$OPENMSX" -machine Panasonic_FS-A1GT -ext gfx9000 -carta "$ROM" -romtype ASCII16 $RAMEXT \
     -script "$HERE/replay.tcl" 2>&1 | grep -E '^replay|^  |rror'
+
+openmsx -machine Panasonic_FS-A1GT -ext gfx9000 -carta supermariones.rom -romtype ASCII16 -ext ram 1024mb

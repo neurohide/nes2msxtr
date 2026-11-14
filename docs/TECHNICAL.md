@@ -191,7 +191,7 @@ frames).
 **Controller:**
 - D-pad: cursor keys or joystick 1.
 - A: Z, SPACE or trigger A. B: X or trigger B.
-- Start: RETURN. Select: SELECT.
+- Start: RETURN. Select: SELECT (F7 in openMSX) or TAB.
 
 ## Status
 
@@ -240,8 +240,6 @@ These are reported in `report.txt` where detectable:
 - No DMC channel. Noise and triangle share PSG channel C.
 - Raster effects other than one sprite-0 split or MMC3 IRQ splits aren't
   emulated.
-- Horizontal mirroring: vertical scrolling wraps at 512 lines instead of 480,
-  which can show 4 blank rows at the wrap.
 - `BIT` results used for both N and Z keep only Z. So does `PLP` of a status
   byte with both N and Z set.
 - Computed jumps are found by pattern. Targets built some other way (arithmetic

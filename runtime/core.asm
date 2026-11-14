@@ -391,8 +391,9 @@ v9990_init:
         ld hl, $FE00
         call vwaddr
         ld b, 128
-vi_sat: xor a
+vi_sat: ld a, $E0               ; Y below the picture (see su_hide)
         out (V_VRAM), a
+        xor a
         out (V_VRAM), a
         out (V_VRAM), a
         ld a, $10
@@ -807,6 +808,11 @@ df_fixed:
         ld a, (win_seg)
         push af
         ld a, DSEG_DYN
+if DYN_SPLIT
+        bit 7, l                ; low byte >= $80: second table (DSEG_DYN + 1)
+        jr z, $+3
+        inc a
+endif
         ld (win_seg), a
         out (MAP_P2), a
         ld h, 0
@@ -885,6 +891,102 @@ rts_jump:
         pop de
         ex af, af'
         jp dyn_jump
+
+; RTS on a 6502 stack that TXS switched (P.stack_switch_rts): it returns to
+; the address on that stack. When the top Z80 frame is the one a translated
+; JSR pushed with that same return address (the routine was called after
+; all), return through it, so it doesn't stay behind for a later RET.
+rts_sw:
+        ex af, af'
+        di
+        push de
+        ld hl, (s6_ptr)
+        inc l
+        ld e, (hl)
+        inc l
+        ld d, (hl)
+        ld (s6_ptr), hl
+        ld (fc_tgt), de         ; 6502 return address - 1
+        ld hl, 2
+        add hl, sp
+        ld e, (hl)
+        inc hl
+        ld d, (hl)              ; DE = top Z80 frame
+        ld a, e
+        cp xret & $FF
+        jr nz, rs_near
+        ld a, d
+        cp xret >> 8
+        jr nz, rs_near
+        inc hl                  ; [return][xret]: the return address is in
+        ld e, (hl)              ; the caller's bank, on the bank stack
+        inc hl
+        ld d, (hl)
+        ld a, (cur_bank)
+        push af
+        ld hl, (bstk)
+        ld a, (hl)
+        call set_bank
+        call rs_match
+        pop hl                  ; H = this bank
+        push af                 ; Z = match
+        ld a, h
+        call set_bank
+        pop af
+        jr rs_go
+rs_near:
+        call rs_match
+rs_go:  pop de
+        jr nz, rs_far
+        ex af, af'
+        ei
+        ret
+rs_far: ld hl, (fc_tgt)
+        inc hl
+        ex af, af'
+        jp dyn_jump
+
+; DE = Z80 return address in the mapped code bank -> Z when it follows a
+; translated JSR that pushed (fc_tgt): ld (hl),lo / inc l / ld (hl),hi /
+; [ld hl,nn] / call nn.
+rs_match:
+        ex de, hl
+        dec hl
+        dec hl
+        dec hl
+        ld a, (hl)
+        cp $CD                  ; call nn
+        ret nz
+        dec hl
+        dec hl
+        dec hl
+        ld a, (hl)
+        cp $21                  ; ld hl,nn before the call
+        jr z, rm_ldhl
+        inc hl
+        inc hl
+        jr rm_hi
+rm_ldhl:
+        dec hl
+rm_hi:  ld a, (fc_tgt + 1)
+        cp (hl)
+        ret nz
+        dec hl
+        ld a, (hl)
+        cp $36                  ; ld (hl),n
+        ret nz
+        dec hl
+        ld a, (hl)
+        cp $2C                  ; inc l
+        ret nz
+        dec hl
+        ld a, (fc_tgt)
+        cp (hl)
+        ret nz
+        dec hl
+        ld a, (hl)
+        cp $36
+        ret
 
 ; PHP: push N (D bit 7), V, B, I/D, Z (D = 0) and C as a 6502 status byte.
 php_rt:
@@ -1391,6 +1493,7 @@ ir_sp:  dw 0                    ; SP at ir_call (rti_go returns through it)
 
 ; Split-screen line interrupt: switch to the below-split scroll.
 isr_line:
+        call hr_sync
 if MMC3
         ld a, (irq_nact)
         or a
@@ -1410,4 +1513,13 @@ endif
         inc hl
         ld a, (hl)
         out (V_REGD), a
+        ret
+
+; The line interrupt is taken a varying time after it comes (interrupts
+; held off), often in the visible part of the line: a scroll written there
+; tears that line. Wait for the horizontal retrace (now, if already in it).
+hr_sync:
+        in a, (V_STAT)
+        and $20
+        jr z, hr_sync
         ret

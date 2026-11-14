@@ -3,7 +3,7 @@
 ;   NES      keyboard            joystick
 ;   A        Z or SPACE          trigger A
 ;   B        X                   trigger B
-;   Select   SELECT
+;   Select   SELECT or TAB
 ;   Start    RETURN
 ;   D-pad    cursor keys         stick
 
@@ -43,6 +43,9 @@ read_pad:
         jr z, $+4
         set 3, c
         bit 6, b
+        jr z, $+4
+        set 2, c
+        bit 3, b                ; TAB too: openMSX puts SELECT on F7, a media key on Macs
         jr z, $+4
         set 2, c
         ld a, 15                ; joystick port 1, pins 6/7 high

@@ -15,3 +15,5 @@ testrom/*.o
 testrom/*.nes
 testrom/*.lbl
 testrom/*.chr
+# Release copies
+published/

@@ -76,6 +76,7 @@ su_stamp:   equ VARS+61         ; spr_update pass counter
 su_kbase:   equ VARS+62         ; cache key bits shared by all sprites
 sp_pat:     equ VARS+63         ; its V9990 pattern
 sp_free:    equ VARS+64         ; cache slot to replace on a miss
+sp_tall:    equ VARS+65         ; an 8x16 sprite pattern was uploaded
 nt_x:       equ VARS+66         ; attribute bits changed by the last write
 bstk:       equ VARS+67         ; word: bank stack pointer
 fc_tgt:     equ VARS+69         ; word: far_call / drop_frame scratch

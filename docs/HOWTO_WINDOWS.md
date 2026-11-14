@@ -21,6 +21,11 @@ nes2msxtr runs under WSL (Windows Subsystem for Linux) — the build uses
 ## 2. Generate a ROM from an NES file
 
 1. Copy your ROM into `sourcerom/`, e.g. `sourcerom/mygame.nes`.
+   If the file name has spaces, it's recommended to link it under a short
+   name without spaces and use that name from then on:
+   ```
+   wsl ln -sfn "Bubble Bobble (USA).nes" sourcerom/bubblebobble.nes
+   ```
 2. Build:
    ```
    wsl make ROM=mygame
@@ -50,7 +55,7 @@ NES controller 1 works with either the MSX keyboard or joystick port 1:
 | A | Z or SPACE | Trigger A |
 | B | X | Trigger B |
 | Start | RETURN | — |
-| Select | SELECT | — |
+| Select | SELECT (F7 in openMSX) or TAB | — |
 
 ## 4. Other mappers (UxROM / MMC1 / MMC3): finding missed jump targets
 

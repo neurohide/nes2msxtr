@@ -25,9 +25,9 @@ emulates the NES picture, sound and mapper on the MSX hardware.
 |---|---|---|
 | ![Super Mario Bros. on MSX turboR + GFX9000](docs/screenshots/supermariobros.png) | ![Contra on MSX turboR + GFX9000](docs/screenshots/contra.png) | ![Double Dragon II on MSX turboR + GFX9000](docs/screenshots/doubledragonii.png) |
 
-| Banana Dash demo | Nova |
-|---|---|
-| ![Banana Dash demo on MSX turboR + GFX9000](docs/screenshots/bananadashdemo.png) | ![Nova on MSX turboR + GFX9000](docs/screenshots/nova.png) |
+| Banana Dash demo | Nova | Bubble Bobble |
+|---|---|---|
+| ![Banana Dash demo on MSX turboR + GFX9000](docs/screenshots/bananadashdemo.png) | ![Nova on MSX turboR + GFX9000](docs/screenshots/nova.png) | ![Bubble Bobble on MSX turboR + GFX9000](docs/screenshots/bubblebobble.png) |
 
 *These screenshots are samples that show the result of the translation: the
 cartridges nes2msxtr built from the ROMs listed below, running in openMSX on
@@ -42,6 +42,7 @@ work at all.
 | File in `sourcerom/` | Game | Mapper | SHA-1 (whole `.nes` file) |
 |---|---|---|---|
 | `bananadashdemo.nes` | Banana Dash demo | 2 (UxROM) | `581be5540c4765a6275f44c8d791eedd26563f9e` |
+| `bubblebobble.nes` | Bubble Bobble (USA) | 1 (MMC1) | `b220cb06a7e23c55a982fd75b32554d0bf511b7b` |
 | `contra.nes` | Contra (USA) | 2 (UxROM) | `c9ea66bb7cb30ad5343f1721b1d4d3219859319b` |
 | `doubledragonii.nes` | Double Dragon II: The Revenge (USA) | 4 (MMC3) | `457bf2438e11aa86947e5911c24f7075a9eceaeb` |
 | `nova.nes` | Nova | 1 (MMC1) | `b6b07ee76492ed475f39167c89b342353f999231` |
@@ -142,6 +143,11 @@ nes2msxtr/
 1. Install the dependencies (once): `make deps`, or `tools\deps.cmd` on
    Windows. See [Installing dependencies](#installing-dependencies).
 2. Copy your ROM into `sourcerom/`, for example `sourcerom/mygame.nes`.
+   If the file name has spaces (as in most dumps), it's recommended to link
+   it under a short name without spaces and use that name from then on:
+   ```
+   ln -sfn "Bubble Bobble (USA).nes" sourcerom/bubblebobble.nes
+   ```
 3. Build it:
    ```
    make ROM=mygame
@@ -197,6 +203,20 @@ make discover ROM=nova
 ```
 
 The jump targets found so far are in `samples/nova.entries.txt`.
+
+### Bubble Bobble
+
+`sourcerom/bubblebobble.nes`, Bubble Bobble (USA). MMC1, 128K PRG, 64K CHR
+ROM. Needs 368K of RAM.
+
+```
+make ROM=bubblebobble
+make run ROM=bubblebobble
+make discover ROM=bubblebobble DISCOVER_PLAY=2
+```
+
+The game runs its own task scheduler, switching between 6502 stacks; the
+translation follows those switches. Automated play reaches level 2.
 
 ### Super Mario Bros.
 
@@ -255,7 +275,7 @@ by playing.
 | A | Z or SPACE | trigger A |
 | B | X | trigger B |
 | Start | RETURN | |
-| Select | SELECT | |
+| Select | SELECT (F7 in openMSX) or TAB | |
 
 ## Other commands
 

@@ -25,6 +25,7 @@ def main(rom_path, out=None):
     fixed = banks[-1]
 
     def rd(b, a):                  # bank b mapped at $8000, fixed at $C000
+        if a >= 0x10000: return None
         if a >= 0xC000: return fixed[a - 0xC000]
         if a >= 0x8000: return banks[b][a - 0x8000]
         return None

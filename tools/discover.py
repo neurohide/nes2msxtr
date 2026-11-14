@@ -26,29 +26,33 @@ name = os.path.splitext(os.path.basename(rom))[0]
 # runs: the attract mode, plain play, then play with each set of pokes
 mode = os.environ.get("DISCOVER_PLAY") or "1"
 runs = [("0", ""), (mode, "")] + [(mode, p) for p in os.environ.get("DISCOVER_POKES", "").split(";") if p]
-run = 0
+path = os.path.join(out, "entries.txt")
 for r in range(rounds):
-    play, poke = runs[run]
     b = subprocess.run([sys.executable, os.path.join(here, "nes2msxtr.py"), rom, out],
                        capture_output=True, text=True)
     if b.returncode: sys.exit(b.stdout + b.stderr)
-    subprocess.run([os.path.join(here, "omsx", "run.sh"), os.path.join(out, name + ".rom"), out, secs],
-                   capture_output=True, env=dict(os.environ, NES2MSX_PLAY=play, NES2MSX_POKE=poke))
     lbl = {m.group(1): int(m.group(2), 16) for m in
            re.finditer(r"^(\w+):\s+equ \$([0-9a-f]+)", open(os.path.join(out, "game.lbl")).read(), re.M)}
-    v = open(os.path.join(out, "msx_vars.bin"), "rb").read()
-    at = lambda name: v[lbl[name] - 0xD100]
-    addr = at("bad_addr") | v[lbl["bad_addr"] - 0xD100 + 1] << 8
-    what = "attract mode" if play == "0" else f"play, pokes {poke}" if poke else "play"
-    if not addr:
-        print(f"round {r + 1}: {secs} s of {what} without an unknown jump target")
-        run += 1
-        if run == len(runs): break
-        continue
-    bank = at("bad_bank")
-    line = f"{bank:x} {addr:04x}" if 0x8000 <= addr < 0xC000 else f"- {addr:04x}"
-    path = os.path.join(out, "entries.txt")
+    # all runs in parallel, each dumping into its own dir; every unknown target found is added
+    procs = []
+    for i, (play, poke) in enumerate(runs):
+        d = os.path.join(out, f".discover{i}")
+        procs.append((d, play, poke, subprocess.Popen(
+            [os.path.join(here, "omsx", "run.sh"), os.path.join(out, name + ".rom"), d, secs],
+            stdout=subprocess.DEVNULL, env=dict(os.environ, NES2MSX_PLAY=play, NES2MSX_POKE=poke))))
     old = open(path).read().split("\n") if os.path.exists(path) else []
-    if line in old: sys.exit(f"round {r + 1}: ${addr:04X} (bank {bank}) is in entries.txt and still unknown")
-    open(path, "a").write(line + "\n")
-    print(f"round {r + 1} ({what}): added {line}")
+    new = []
+    for d, play, poke, p in procs:
+        p.wait()
+        v = open(os.path.join(d, "msx_vars.bin"), "rb").read()
+        addr = v[lbl["bad_addr"] - 0xD100] | v[lbl["bad_addr"] - 0xD100 + 1] << 8
+        if not addr: continue
+        bank = v[lbl["bad_bank"] - 0xD100]
+        line = f"{bank:x} {addr:04x}" if 0x8000 <= addr < 0xC000 else f"- {addr:04x}"
+        if line in old: sys.exit(f"round {r + 1}: ${addr:04X} (bank {bank}) is in entries.txt and still unknown")
+        if line not in new: new.append(line)
+    if not new:
+        print(f"round {r + 1}: {secs} s of {len(runs)} runs without an unknown jump target")
+        break
+    open(path, "a").write("".join(l + "\n" for l in new))
+    print(f"round {r + 1}: added {', '.join(new)}")

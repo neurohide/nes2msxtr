@@ -243,17 +243,27 @@ def trace(prg, kind="nrom", extra=()):
     def run(entries):
         code, labels, calls, warns = {}, set(), set(), []
         P.inline_cont = {}
+        P.ind_call = set()  # JMP (ind) used as JSR: see below
         soft = set()     # reached by falling through a skip's operand
         unoff = set()    # where an unofficial opcode may be decoded
         nofall = set()   # branches that are always taken
         skips = set()    # BIT instructions that hide the next instruction
+        tbl = set()      # ROM addresses read as data (LDA table,Y ...)
         work = list(entries)
+
+        def nop_lands(a):
+            # an unofficial NOP ending where traced code starts (padding run
+            # into a routine, e.g. ahead of the NMI handler) is no data
+            o = OPS.get(rd(a))
+            return o is not None and o[0] == "NOP" and (nxt(a, MODES[o[1]]) in labels or nxt(a, MODES[o[1]]) in entries)
         while work:
             a = start = work.pop()
-            imm = prev = None
+            imm = None
+            prev = ()
             after_skip = False
             while inrom(a) and a not in code:
-                d = decode(a) if rd(a) not in UNOFFICIAL or a in unoff or a in labels or a in entries else None
+                d = decode(a) if rd(a) not in UNOFFICIAL or a in unoff or a in labels or a in entries \
+                    or nop_lands(a) else None
                 if d is None:
                     warns.append(f"invalid opcode ${rd(a):02X} at ${a:04X} (path from ${start:04X})"); break
                 n, m, mode, arg = d
@@ -281,15 +291,28 @@ def trace(prg, kind="nrom", extra=()):
                     t = canon(a + 2)
                     labels.add(t); work.append(t)
                     break
+                # LDA #>ret / PHA / LDA #<ret / PHA / JMP (ptr) with ret + 1 the
+                # next instruction: an indirect JSR. The code after it runs.
+                if m == "JMP" and mode == "ind" and [rd(a - k) for k in (6, 4, 3, 1)] == [0xA9, 0x48, 0xA9, 0x48] \
+                        and (rd(a - 5) << 8 | rd(a - 2)) + 1 == (a + 3) & 0xFFFF:
+                    P.ind_call.add(a)
+                    c = nxt(a, n); labels.add(c); work.append(c)
                 if m in ENDS_FLOW: break
                 # LDx #imm followed by a branch on Z/N is unconditional
                 if mode == "rel" and imm is not None and (
                         (m == "BNE" and imm) or (m == "BEQ" and not imm) or
                         (m == "BPL" and imm < 0x80) or (m == "BMI" and imm >= 0x80)):
                     nofall.add(a); break
-                # BCC x / BCS y (or any opposite pair) never falls through
-                if mode == "rel" and prev == OPPOSITE[m]: nofall.add(a); break
-                prev = m if mode == "rel" else None
+                # BCC x / BCS y (or any opposite pair, also with other
+                # branches between: BMI / BEQ / BPL) never falls through
+                if mode == "rel" and OPPOSITE[m] in prev: nofall.add(a); break
+                # nor a branch onto a table the code reads (LDA tbl,Y / BNE
+                # back, with the table right after): it can't be code
+                if mode == "rel" and nxt(a, n) in tbl: nofall.add(a); break
+                if m in TBL_READS and mode in ("abs", "abx", "aby"):
+                    t = mem.at(a, arg)
+                    if t is not None and inrom(t): tbl.add(t)
+                prev = prev + (m,) if mode == "rel" else ()
                 imm = arg if (mode == "imm" and m in ("LDA", "LDX", "LDY")) else None
                 if m == "JSR" and (mem.at(a, arg) in P.inline or mem.at(a, arg) in P.inline_fixed):
                     c = data_end(a)
@@ -435,8 +458,10 @@ def trace(prg, kind="nrom", extra=()):
     labels.update(entries)
     P.code, P.labels, P.calls, P.warnings = code, labels, calls, warns
     P.rd, P.rw = rd, rw
+    traced = {a & 0xFFFF for a in code if a >> 16}
     for site, bk in sorted(P.xbank.items()):
-        if bk is None:
+        # a target traced in some bank (entries.txt) is found at run time
+        if bk is None and code[site][3] not in traced:
             warns.append(f"${site:04X}: bank mapped at this call into $8000-$BFFF not known; not traced")
     # the NMI handler's own code: the translator treats its pulls below the
     # interrupt frame as leaving the interrupted routine (see nes2msxtr)
@@ -611,15 +636,17 @@ def _find_dispatch(code, engines, decode, mem, dbank={}):
             out.append(t)
         return out
 
-    def entries2(lo, hi, site):
-        return per_bank(site, lambda view: entries21(lo, hi, site, view))
+    def entries2(lo, hi, site, bound=None):
+        return per_bank(site, lambda view: entries21(lo, hi, site, view, bound))
 
-    def entries21(lo, hi, site, view):
-        """lo/hi: ("ptr", lo table, hi table, Y offset) -> targets"""
+    def entries21(lo, hi, site, view, bound=None):
+        """lo/hi: ("ptr", lo table, hi table, Y offset) -> targets;
+        bound: entries in the outer table (CMP #n / BCS before the lookup)"""
         _, L, H, k = lo
         if hi[1:3] != (L, H) or hi[3] != k + 1: return []
         stride, limit = (2, 128) if H == L + 1 else (1, 256)
-        out = []
+        if bound: limit = min(limit, bound)
+        subs = []
         for i in range(limit):
             la, ha = L + i * stride, H + i * stride
             if not (inrom(la) and inrom(ha)): break
@@ -631,8 +658,15 @@ def _find_dispatch(code, engines, decode, mem, dbank={}):
                        for j in range(0, 10, 2)):
                 if i == 0: continue     # a null entry 0 is common
                 break
+            subs.append(q)
+        out = []
+        for q in subs:
+            # a sub-table ends where the next one starts, or at the code of
+            # its own lowest target (routines often follow their table)
+            end = min([r for r in subs if r > q] + [0x10000])
             got = 0
             for j in range(0, 256, 2):
+                if q + j + k + 1 >= end: break
                 a0, a1 = view((q + j + k) & 0xFFFF), view((q + j + k + 1) & 0xFFFF)
                 if a0 is None or a1 is None or not (inrom(a0) and inrom(a1)):
                     if got or j >= 8: break
@@ -644,6 +678,7 @@ def _find_dispatch(code, engines, decode, mem, dbank={}):
                     continue            # unused entries (outside ROM) before the first
                 got += 1
                 if t not in out: out.append(t)
+                if t >> 16 == a0 >> 16 and q + j + k < (t & 0xFFFF) < end: end = t & 0xFFFF
         return out
 
     found = {}
@@ -653,8 +688,14 @@ def _find_dispatch(code, engines, decode, mem, dbank={}):
         while a in pred and len(seq) < 16:
             a = pred[a]; seq.append(a)
         A, stack, stores, yoff = None, [], {}, None
-        for a in reversed(seq):
+        bound, doubled = None, False    # CMP #n / BCS: index range of the table
+        for i2, a in enumerate(reversed(seq)):
             _, m2, mode2, arg2 = code[a]
+            if m2 == "ASL" and mode2 == "acc": doubled = True
+            elif m2 == "LSR" and mode2 == "acc": doubled = False
+            elif m2 == "CMP" and mode2 == "imm" and i2 + 1 < len(seq) \
+                    and code[list(reversed(seq))[i2 + 1]][1] == "BCS":
+                bound = arg2 >> doubled
             if m2 == "LDA" and mode2 == "izy":
                 lo, hi = stores.get(arg2), stores.get((arg2 + 1) & 0xFF)
                 A = ("ptr", lo[1], hi[1], yoff) if lo and hi and lo[0] == hi[0] == "tbl" \
@@ -679,7 +720,7 @@ def _find_dispatch(code, engines, decode, mem, dbank={}):
             tg = entries(stack[-1], stack[-2], 1, site)
         else:
             lo, hi = stores.get(arg), stores.get(arg + 1)
-            if lo and hi and lo[0] == hi[0] == "ptr": tg = entries2(lo, hi, site)
+            if lo and hi and lo[0] == hi[0] == "ptr": tg = entries2(lo, hi, site, bound)
             else: tg = entries(lo, hi, 0, site)
         if tg: found[site] = tg
     return found
@@ -1081,6 +1122,9 @@ def _bank_flow(P, code, engines, tables, dispatch):
     return xbank
 
 
+TBL_READS = {"LDA", "LDX", "LDY", "CMP", "CPX", "CPY", "ADC", "SBC", "AND", "ORA", "EOR", "BIT"}
+
+
 def _stack_depth(P):
     """Depth (bytes pushed since the current routine was entered) per address.
 
@@ -1091,25 +1135,65 @@ def _stack_depth(P):
     code = P.code
     depth, P.txs_restore, P.stack_switch_rts = {}, set(), set()
     P.stack_switch_code = set()
-    work = [(r, 0, None, False) for r in P.roots]
-    work += [(t, 0, None, False) for t in P.calls]
+    yielders = getattr(P, "yielders", set())
+    tsx = any(c[1] == "TSX" for c in code.values())
+    sw_seen = set()
+    # z = (Z flag, Z saved by the last PHP), each 1 / 0 / None (unknown):
+    # LDA #0 / PHP / JSR / PLP / BNE takes the branch on one path into the
+    # code and not on another, which arrives at another depth
+    Z0 = (None, None)
+    work = [(r, 0, None, False, Z0) for r in P.roots]
+    work += [(t, 0, None, False, Z0) for t in P.calls]
     # Runtime-discovered targets have no translated Z80 CALL frame. They
     # return through the emulated 6502 stack even when the target is reached
     # after an earlier stack switch.
-    work += [(t, 0, None, True) for t in sorted(P.extra)]
     mem = P.mem
+    # ... unless a JSR calls them (dyn_call keeps a Z80 frame): task entries
+    # pushed as data and reached by RTS are the switched ones
+    # Without TSX there's no saved stack to switch to, and the 6502 stack
+    # holds no return addresses (see the translator's faithful mode).
+    called = {c[3] for c in code.values() if c[1] == "JSR"}
+    work += [(t, 0, None, tsx and (t & 0xFFFF) not in called, Z0) for t in sorted(P.extra)]
+    alt = {}        # address -> other depths it was walked at
+    zs = {}         # address -> z states it was walked with
+    warned = set()
+
+    def conflict(a, d):
+        if a not in warned:
+            warned.add(a)
+            P.warnings.append(f"inconsistent stack depth at ${a:04X} ({depth[a]} vs {d})")
     while work:
-        a, d, sx, switched = work.pop()
+        a, d, sx, switched, (zk, pz) = work.pop()
         while a in code:
+            other = False
             if a in depth:
                 if switched:
                     P.stack_switch_code.add(a)
-                if depth[a] != d and not switched and a not in P.stack_switch_code:
-                    P.warnings.append(f"inconsistent stack depth at ${a:04X} ({depth[a]} vs {d})")
-                break
-            depth[a] = d
-            if switched: P.stack_switch_code.add(a)
+                # 0 vs -2: a tail jump after PLA/PLA dropped the return frame
+                # runs in the caller's frame, translated the same way
+                if depth[a] != d and not (abs(depth[a] - d) == 2 and max(depth[a], d) <= 0) \
+                        and not switched and a not in P.stack_switch_code:
+                    # walk on at this depth too: the paths may meet again
+                    # (see z); only where the depth changes the translation
+                    # is it a conflict
+                    seen = alt.setdefault(a, set())
+                    if d in seen: break
+                    if len(seen) >= 4: conflict(a, d); break
+                    seen.add(d); other = True
+                # first reached unswitched, now switched: walk on so its RTS is
+                # marked. Known Z prunes branches: walk again with other flags
+                elif (not switched or a in sw_seen) and (
+                        (None, None) in zs.get(a, ()) or (zk, pz) in zs.get(a, ())): break
+            else: depth[a] = d
+            zs.setdefault(a, set()).add((zk, pz))
+            if switched:
+                sw_seen.add(a)
+                P.stack_switch_code.add(a)
             n, m, mode, arg = code[a]
+            # where the depth changes the translation: returns, TXS, pulls of
+            # the return address
+            if other and (m in ("RTS", "RTI", "TXS") or m in ("PLA", "PLP") and min(depth[a], d) <= 0):
+                conflict(a, d); break
             if m in ("PHA", "PHP"): d += 1
             elif m in ("PLA", "PLP"): d -= 1
             elif m == "TSX": sx = d
@@ -1120,29 +1204,83 @@ def _stack_depth(P):
                     # TXS has selected a separate 6502 stack. Its current
                     # height is unrelated to the caller's tracked frame.
                     d = 0
-                    switched = True
+                    switched = tsx
             elif m in ("TAX", "INX", "DEX", "LDX", "PLX"):
                 sx = None
             if m == "RTS" and switched:
                 P.stack_switch_rts.add(a)
-            if mode == "rel": work.append((branch_target(a, arg), d, sx, switched))
+            if m == "PHP": pz = zk
+            elif m == "PLP": zk = pz
+            elif m in ("LDA", "LDX", "LDY") and mode == "imm": zk = int(arg == 0)
+            elif m == "ORA" and mode == "imm" and arg: zk = 0
+            elif m not in ("STA", "STX", "STY", "PHA", "CLC", "SEC", "CLI", "SEI", "CLD", "SED",
+                           "CLV", "NOP", "TXS") and mode != "rel": zk = None
+            if mode == "rel":
+                if m in ("BNE", "BEQ"):
+                    zt = int(m == "BEQ")        # Z when taken
+                    if zk is None or zk == zt:
+                        work.append((branch_target(a, arg), d, sx, switched, (zt, pz)))
+                    if zk == zt: break          # always taken
+                    zk = 1 - zt
+                else:
+                    work.append((branch_target(a, arg), d, sx, switched, (zk, pz)))
             if m == "JMP" and mode == "abs":
                 v = mem.at(a, arg)
                 tg = [v] if v is not None else [mem.banked(arg, b) for b in P.xbank.get(a) or ()]
-                work += [(t, d, sx, switched) for t in tg]
+                work += [(t, d, sx, switched, (zk, pz)) for t in tg]
             if a in P.dispatch:
                 # RTS-trick: the two pushed bytes are consumed by the jump
-                work += [(t, d - 2 if m == "RTS" else d, None, False) for t in P.dispatch[a]]
+                work += [(t, d - 2 if m == "RTS" or a in P.ind_call else d, None, False, Z0) for t in P.dispatch[a]]
+            if a in P.ind_call:     # the targets' RTS pops the pushed return
+                work.append((nxt(a, n), d - 2, sx, switched, Z0))
             if m == "BRK" and mem.mmc1:
-                work.append((canon(a + 2), d, sx, switched))
+                work.append((canon(a + 2), d, sx, switched, Z0))
                 break
             if m in ENDS_FLOW or a in P.nofall: break
             if m == "JSR" and mem.at(a, arg) in P.engines:
                 # cases run at the dispatch site's depth (the engine pops its own return)
-                work += [(t, d, None, False) for t in P.tables.get(a, [])]
+                work += [(t, d, None, False, Z0) for t in P.tables.get(a, [])]
                 break
             if a in P.inline_cont:
-                work.append((P.inline_cont[a], d, sx, switched))
+                work.append((P.inline_cont[a], d, sx, switched, Z0))
                 break
+            # a routine that yields to another 6502 task: when it returns, the
+            # Z80 stack holds another task's frames, so what follows is switched
+            if m == "JSR" and mem.at(a, arg) in yielders: switched = True
             a = nxt(a, n)
     P.depth = depth
+    if not yielders:
+        P.yielders = _yielders(P)
+        if P.yielders: _stack_depth(P)
+
+
+def _yielders(P):
+    """Entry addresses of routines that (transitively) reach a TXS that
+    selects another stack: the cooperative-task switchers and their callers."""
+    code, mem = P.code, P.mem
+    txs = {a for a, c in code.items() if c[1] == "TXS" and a not in P.txs_restore}
+    calls, hit = {}, {}
+    def scan(t):
+        if t in calls: return
+        seen, st, js, tx = set(), [t], set(), False
+        while st:
+            a = st.pop()
+            while a in code and a not in seen:
+                seen.add(a)
+                n, m, mode, arg = code[a]
+                if a in txs: tx = True
+                if m == "JSR" and mem.at(a, arg) is not None: js.add(mem.at(a, arg))
+                if mode == "rel": st.append(branch_target(a, arg))
+                if m == "JMP" and mode == "abs":
+                    v = mem.at(a, arg)
+                    if v is not None: st.append(v)
+                if m in ENDS_FLOW or a in P.nofall: break
+                a = nxt(a, n)
+        calls[t], hit[t] = js, tx
+        for j in js: scan(j)
+    for t in set(P.roots) | set(P.calls): scan(t)
+    ys = {t for t, h in hit.items() if h}
+    while True:
+        add = {t for t, js in calls.items() if t not in ys and js & ys}
+        if not add: return ys
+        ys |= add

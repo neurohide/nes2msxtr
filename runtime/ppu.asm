@@ -5,7 +5,12 @@
 ; carries the attribute palette. Physical nametable k is placed in the
 ; 64x64 V9990 map twice so the 512x512 roll matches NES mirroring:
 ;   vertical mirroring:   columns k*32.., rows r and r+30
-;   horizontal mirroring: rows k*30+r, columns c and c+32
+;   horizontal mirroring: rows k*30+r, columns c; and rows (1-k)*30+r,
+;   columns c+32: the right half has the nametables in the other order, so
+;   a view that crosses the NES wrap (line 480 -> 0) never crosses the map's
+;   own wrap at 512 (calc_scroll picks the half). A game that scrolls X
+;   needs both halves the same: from its first X scroll on (hm_dup), the
+;   right half is a plain copy again, and the wrap can show 4 blank rows.
 ; Sprites: NES sprite i -> V9990 sprite i, pattern slot i, uploaded on
 ; change (palette and flips baked in; V9990 sprites cannot flip).
 ; Palette: NES palette index i -> V9990 palette entry i (sprites use
@@ -936,6 +941,9 @@ nc_ns:  ld a, c
         ld a, (nt_r)
         ld b, a
         call nt_emit
+        ld a, (vm_dup)          ; rows 30-59: only once the view can reach them
+        or a
+        ret z
         ld a, b
         add a, 30
         ld b, a
@@ -954,7 +962,18 @@ nc_h0:  ld b, a
         ld a, c
         add a, 32
         ld c, a
+        ld a, (hm_dup)
+        or a
+        jp nz, nt_emit
+        ld a, b                 ; right half: the other nametable order
+        sub 30
+        jr nc, nc_h1
+        add a, 60
+nc_h1:  ld b, a
         jp nt_emit
+
+hm_dup: db 0                    ; horizontal mirroring: right half = left
+vm_dup: db CROP > 28            ; vertical mirroring: rows 30-59 = rows 0-29
 
 ; B = map row, C = map column: write (nt_tile, nt_ehi). Preserves BC, DE.
 nt_emit:
@@ -975,8 +994,14 @@ nt_emit:
         ld a, i
         push af
         di
+        xor a                   ; vwaddr inlined: VRAM address $7xxxx
+        out (V_REGS), a
+        ld a, l
+        out (V_REGD), a
+        ld a, h
+        out (V_REGD), a
         ld a, $07
-        call vwaddr
+        out (V_REGD), a
         ld a, (nt_tile)
         out (V_VRAM), a
         ld a, (nt_ehi)
@@ -1169,8 +1194,9 @@ su_hide:
         ld a, 1
         ld (de), a
         call su_aw
-        xor a
-        out (V_VRAM), a
+        ld a, $E0               ; below the picture: a disabled sprite still
+        out (V_VRAM), a         ; counts in the 16 per line (Y 0 would take
+        xor a                   ; lines 1-16 from the real ones)
         out (V_VRAM), a
         out (V_VRAM), a
         ld a, $10               ; disabled
@@ -1352,6 +1378,9 @@ sf_hit: inc h                   ; SC_STAMP
         ret
 
 ; Upload 16 lines of pattern (sp_pat) for tile (sp_t0) with (sp_attr).
+; The source tile is mapped once per 8 lines. 8x8 sprites leave lines 8-15
+; as they are while no 8x16 pattern has been uploaded (sp_tall): the boot
+; cleared them.
 spr_upload:
         ld a, (sp_pat)          ; DE = pattern offset within $20000
         and $F0
@@ -1365,29 +1394,20 @@ spr_upload:
         ld e, a
         xor a
         ld (sp_line), a
-spu_line:
-        ld a, (sp_line)
-        ld b, a
-        srl a
-        add a, d
-        ld h, a
-        ld a, b
-        rrca
-        and $80
-        or e
-        ld l, a
-        ld a, VR_SPRPAT_HI
-        call su_vwaddr
+        ld a, (sp_mode)
+        and $20
+        jr z, spu_half
+        ld (sp_tall), a
+spu_half:
         ld a, (sp_mode)
         and $20
         jr nz, spu_tall
-        ld a, b
-        cp 8
-        jr nc, spu_zero
-        xor a
-        jr spu_src
+        ld a, (sp_line)
+        or a
+        jp nz, spu_low8
+        jr spu_src              ; A = 0: the tile itself
 spu_tall:
-        ld a, b
+        ld a, (sp_line)
         rrca
         rrca
         rrca
@@ -1404,31 +1424,17 @@ spu_src:
         adc a, h
         sub l
         ld h, a                 ; tile index 0-511
-        ld a, b
-        and 7
-        ld c, a
-        ld a, (sp_attr)
-        bit 7, a
-        ld a, c
-        jr z, spu_nv
-        xor 7
-spu_nv: add a, a
-        add a, a
-        ld c, a                 ; row * 4
-        ld a, (sp_attr)
-        and $40
-        rrca
-        or c
-        ld c, a                 ; + hflip * 32
         add hl, hl
         add hl, hl
         add hl, hl
         add hl, hl
         add hl, hl
         add hl, hl              ; tile * 64
-        ld a, l
-        or c
-        ld l, a
+        ld a, (sp_attr)
+        and $40
+        rrca
+        or l
+        ld l, a                 ; + hflip * 32
         ld a, h
         rlca
         rlca
@@ -1439,34 +1445,91 @@ spu_nv: add a, a
         and $3F
         or $80
         ld h, a
+        push hl                 ; row 0 of the tile in the window
         ld a, (sp_attr)
         and 3
         add a, SPR_LUT >> 8
-        ld c, a
-        ld b, 4
-spu_b:  ld a, (hl)
-        inc hl
-        push hl
-        ld l, a
-        ld h, c
-        ld a, (hl)
-        out (V_VRAM), a
+        ld b, a                 ; B = palette expansion page
+        ld c, 0                 ; C = row xor: 7 when flipped vertically
+        ld a, (sp_attr)
+        rlca
+        jr nc, spu_row
+        ld c, 7
+spu_row:
+        call spu_addr
         pop hl
-        djnz spu_b
-        jr spu_next
+        push hl
+        ld a, (sp_line)
+        and 7
+        xor c
+        add a, a
+        add a, a
+        or l
+        ld l, a                 ; + row * 4
+        push de
+        ld d, b
+        ld a, (hl)
+        inc l
+        ld e, a
+        ld a, (de)
+        out (V_VRAM), a
+        ld a, (hl)
+        inc l
+        ld e, a
+        ld a, (de)
+        out (V_VRAM), a
+        ld a, (hl)
+        inc l
+        ld e, a
+        ld a, (de)
+        out (V_VRAM), a
+        ld a, (hl)
+        ld e, a
+        ld a, (de)
+        out (V_VRAM), a
+        pop de
+        ld hl, sp_line
+        inc (hl)
+        ld a, (hl)
+        and 7
+        jr nz, spu_row
+        pop hl
+        ld a, (sp_line)         ; 8 or 16
+        cp 16
+        jp nz, spu_half
+        ret
+spu_low8:
+        ld a, (sp_tall)         ; an 8x16 pattern may have used the slot
+        or a
+        ret z
 spu_zero:
+        call spu_addr
         xor a
         out (V_VRAM), a
         out (V_VRAM), a
         out (V_VRAM), a
         out (V_VRAM), a
-spu_next:
-        ld a, (sp_line)
-        inc a
-        ld (sp_line), a
+        ld hl, sp_line
+        inc (hl)
+        ld a, (hl)
         cp 16
-        jp nz, spu_line
+        jr nz, spu_zero
         ret
+
+; VRAM address of line (sp_line) of the pattern at DE. Clobbers A, HL.
+spu_addr:
+        ld a, (sp_line)
+        ld h, a
+        rrca
+        and $80
+        or e
+        ld l, a
+        ld a, h
+        srl a
+        add a, d
+        ld h, a
+        ld a, VR_SPRPAT_HI
+        jp su_vwaddr
 
 ; ---------------------------------------------------------------------------
 ; Scroll. Called with interrupts off at the end of each frame's NMI.
@@ -1496,7 +1559,36 @@ pa_spr: ld a, (ppu_ctrl)
         jr z, pa_bg
         ld (hl), a
         call nt_refresh_all
-pa_bg:  ld a, (split_on)
+pa_bg:  ld a, (mir_v)            ; first X scroll with horizontal mirroring:
+        ld hl, hm_dup           ; the map's right half becomes a copy
+        or (hl)
+        jr nz, pa_hm
+        ld a, (scroll_x)
+        or a
+        jr z, pa_hm
+        ld (hl), 1
+        call nt_refresh_all
+pa_hm:
+if CROP < 29
+        ld a, (mir_v)           ; vertical mirroring: the first Y scroll that
+        or a                    ; shows NES rows 30+ (Y + CROP + 212 > 240)
+        jr z, pa_vm             ; turns on the copy at rows 30-59
+        ld hl, vm_dup
+        ld a, (hl)
+        or a
+        jr nz, pa_vm
+        ld a, (scroll_y)
+        cp 29 - CROP
+        jr nc, pa_vdup
+        ld a, (top_sy)
+        cp 29 - CROP
+        jr c, pa_vm
+pa_vdup:
+        ld (hl), 1
+        call nt_refresh_all
+pa_vm:
+endif
+        ld a, (split_on)
         or a
         jp z, pa_nosplit
         call cur_to_reg         ; below the split: current X, top's Y
@@ -1516,6 +1608,17 @@ pa_bg:  ld a, (split_on)
         ld (bot_regs), a
         ld a, (vregs + 1)
         ld (bot_regs + 1), a
+        ld a, (mir_v)           ; horizontal mirroring: and the top's map half
+        or a
+        jr nz, pa_half
+        ld a, (bot_regs + 3)
+        and $1F
+        ld b, a
+        ld a, (vregs + 3)
+        and $20
+        or b
+        ld (bot_regs + 3), a
+pa_half:
         ld a, (OAM + 1)         ; split line = sprite 0 Y + 2 + first opaque row
         ld l, a
         ld h, 0
@@ -1613,6 +1716,22 @@ calc_scroll:
         add hl, de
         ld a, (mir_v)
         or a
+if MMC3
+if CROP < 29
+        jr z, cs_h
+        ld a, (vm_dup)          ; a Y set by a scanline IRQ (ppu_apply sees
+        or a                    ; only the NMI's): rows 30-59 from the next
+        jr nz, cs_wrapped       ; frame on (isr rebuilds the map)
+        ld a, (reg_sy)
+        cp 29 - CROP
+        jr c, cs_wrapped
+        ld a, 1
+        ld (vm_dup), a
+        ld (mir_dirty), a
+        jr cs_wrapped
+cs_h:
+endif
+endif
         jr nz, cs_wrapped       ; vertical: nametables 0 and 2 are the same
         ld a, (reg_ctrl)
         and 2
@@ -1622,7 +1741,24 @@ calc_scroll:
 cs_y:   ld de, 480
         or a
         sbc hl, de
-        jr nc, cs_wrapped
+        jr nc, cs_hor
+        add hl, de
+cs_hor: ld a, (hm_dup)
+        or a
+        jr nz, cs_wrapped
+        ld a, (vregs + 3)       ; X is 0 here: nametables 0 and 1 are the same
+        and $1F
+        ld (vregs + 3), a
+        ld de, 240              ; lines 240-479: the right half, where they
+        or a                    ; are lines 0-239, so the view (at most 240
+        sbc hl, de              ; lines) never reaches the 512-line wrap
+        jr c, cs_left
+        ld a, (vregs + 3)
+        add a, 32
+        and $3F
+        ld (vregs + 3), a
+        jr cs_wrapped
+cs_left:
         add hl, de
 cs_wrapped:
         ld a, l
