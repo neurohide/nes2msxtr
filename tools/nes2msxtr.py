@@ -447,7 +447,13 @@ class Translator:
         elif m == "TXS":
             L += ["ld hl,s6_ptr", "ld (hl),c"]
             if self.P.depth.get(a, 0) != 0 and a not in self.P.txs_restore:
-                self.warn.append(f"${a:04X}: TXS inside a routine; Z80 return frames are not moved")
+                if self.P.code.get(a - 2) == (2, "LDX", "imm", 0xFF):
+                    # LDX #$FF / TXS reached from inside a routine (a task
+                    # scheduler's loop): the 6502 stack is empty again, so drop
+                    # the Z80 frames and the bank stack too
+                    L += ["ld sp,STACK_TOP", "ld hl,BSTK_TOP", "ld (bstk),hl"]
+                else:
+                    self.warn.append(f"${a:04X}: TXS inside a routine; Z80 return frames are not moved")
         elif m == "CLC": L += ["scf", "ccf"]
         elif m == "SEC": L += ["scf"]
         elif m == "CLV": L += ["push af", "xor a", "ld (vflag),a", "pop af"]
