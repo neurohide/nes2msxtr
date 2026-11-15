@@ -21,32 +21,23 @@ emulates the NES picture, sound and mapper on the MSX hardware.
 >
 > Only use it on game images you own and have the right to convert.
 
-| Super Mario Bros. | Contra | Double Dragon II: The Revenge |
-|---|---|---|
-| ![Super Mario Bros. on MSX turboR + GFX9000](docs/screenshots/supermariobros.png) | ![Contra on MSX turboR + GFX9000](docs/screenshots/contra.png) | ![Double Dragon II on MSX turboR + GFX9000](docs/screenshots/doubledragonii.png) |
+| Nova |
+|---|
+| ![Nova on MSX turboR + GFX9000](docs/screenshots/nova.png) |
 
-| Banana Dash demo | Nova | Bubble Bobble |
-|---|---|---|
-| ![Banana Dash demo on MSX turboR + GFX9000](docs/screenshots/bananadashdemo.png) | ![Nova on MSX turboR + GFX9000](docs/screenshots/nova.png) | ![Bubble Bobble on MSX turboR + GFX9000](docs/screenshots/bubblebobble.png) |
-
-*These screenshots are samples that show the result of the translation: the
-cartridges nes2msxtr built from the ROMs listed below, running in openMSX on
+*This screenshot is a sample that shows the result of the translation: the
+cartridge nes2msxtr built from the ROM listed below, running in openMSX on
 a Panasonic FS-A1GT (R800) with a GFX9000.*
 
 ### ROMs tested
 
-The samples were built and played from these images. Other dumps or
+The sample was built and played from this image. Other dumps or
 revisions of the same games may need other `entries.txt` targets or may not
 work at all.
 
 | File in `sourcerom/` | Game | Mapper | SHA-1 (whole `.nes` file) |
 |---|---|---|---|
-| `bananadashdemo.nes` | Banana Dash demo | 2 (UxROM) | `581be5540c4765a6275f44c8d791eedd26563f9e` |
-| `bubblebobble.nes` | Bubble Bobble (USA) | 1 (MMC1) | `b220cb06a7e23c55a982fd75b32554d0bf511b7b` |
-| `contra.nes` | Contra (USA) | 2 (UxROM) | `c9ea66bb7cb30ad5343f1721b1d4d3219859319b` |
-| `doubledragonii.nes` | Double Dragon II: The Revenge (USA) | 4 (MMC3) | `457bf2438e11aa86947e5911c24f7075a9eceaeb` |
 | `nova.nes` | Nova | 1 (MMC1) | `b6b07ee76492ed475f39167c89b342353f999231` |
-| `supermariobros.nes` | Super Mario Bros. (Japan, USA) | 0 (NROM) | `33d23c2f2cfa4c9efec87f7bc1321ce3ce6c89bd` |
 
 Check yours with `shasum -a 1 sourcerom/*.nes`.
 
@@ -125,6 +116,15 @@ them missing until openMSX finds them.
 `/Applications` if it is there, otherwise `openmsx` on the `PATH`. Set
 `OPENMSX=/path/to/openmsx` to use another.
 
+## Desktop app
+
+`app/` has a small cross-platform window (.NET 8, Avalonia) that checks and
+installs the dependencies, lists `sourcerom/` with the SHA-1 of each ROM, and
+runs discover, conversion and publishing for the ROMs you tick, with the log
+beside it. Start it with `dotnet run --project app/Nes2MsxTr.App`; steps for
+macOS, Linux and Windows (WSL or native) and the single-file builds are in
+[app/README.md](app/README.md).
+
 ## Layout
 
 ```
@@ -133,6 +133,7 @@ nes2msxtr/
   samples/        jump targets found by playing the sample games
   build/<game>/   output: <game>.rom (ASCII16 megaROM), report.txt, ...
   tools/          translator (nes2msxtr.py, nestrace.py) and test tools
+  app/            desktop front end (.NET 8): dependencies, ROM list, convert, log
   runtime/        Z80 runtime: PPU on the V9990, APU on the PSG, mappers
   testrom/        original test ROMs (NROM, UxROM, MMC3)
   docs/           technical notes and screenshots
@@ -161,35 +162,24 @@ nes2msxtr/
 
 `ROM` can be a name in `sourcerom/` (with or without `.nes`) or any path.
 Some jump targets can only be found while the game runs. When the game stops
-on one (red backdrop), `make run` adds it to `build/<game>/entries.txt`;
+on one (red backdrop), `make run` adds it to `build/<game>/entries.<ROM-SHA1>.txt`;
 rebuild and play on. `make discover` finds them headless by playing the game
-automatically (see the samples below).
+automatically (see the sample below).
 
-## Sample games
+A jump to an address the tracer never saw does not stop the game: the cartridge
+carries a small 6502 interpreter (`runtime/interp.asm`, one extra code bank)
+that runs the original bytes there until the flow reaches translated code
+again. It is slow, so such a path still wants an entry; `make discover` builds
+with `--no-interp` so these jumps stay visible as stops. `--no-interp` drops
+the bank from a build (32K less mapper RAM).
 
-Put your own dumps in `sourcerom/` under these names, then build all of them:
+## Sample game
 
-```
-make samples
-```
-
-The jump targets found so far by playing (`samples/<game>.entries.txt`) are
-copied into `build/<game>/` the first time a sample is built.
-
-### Banana Dash demo
-
-`sourcerom/bananadashdemo.nes`, Banana Dash demo. UxROM, 512K PRG, CHR RAM.
-Needs 848K of RAM (a RAM expansion).
-
-```
-make ROM=bananadashdemo
-make run ROM=bananadashdemo
-make discover ROM=bananadashdemo DISCOVER_PLAY=2 DISCOVER_SECS=120
-```
-
-Calls from the fixed bank into the switchable half go through the run-time
-lookup, so many jump targets only show up in play (`samples/` has 44).
-Headless play doesn't get into the first level; play it with `make run`.
+Put your own dump in `sourcerom/` as `nova.nes`, then build it (below). The jump targets found so far by playing are copied into the
+ROM-signature-specific entries file in `build/<game>/` the first time the
+sample is built. The entries file is `samples/entries.<ROM-SHA1>.txt`; see
+[`samples/README.md`](samples/README.md). Make keeps the output folder named
+after the ROM file.
 
 ### Nova
 
@@ -202,70 +192,8 @@ make run ROM=nova
 make discover ROM=nova
 ```
 
-The jump targets found so far are in `samples/nova.entries.txt`.
-
-### Bubble Bobble
-
-`sourcerom/bubblebobble.nes`, Bubble Bobble (USA). MMC1, 128K PRG, 64K CHR
-ROM. Needs 368K of RAM.
-
-```
-make ROM=bubblebobble
-make run ROM=bubblebobble
-make discover ROM=bubblebobble DISCOVER_PLAY=2
-```
-
-The game runs its own task scheduler, switching between 6502 stacks; the
-translation follows those switches. Automated play reaches level 2.
-
-### Super Mario Bros.
-
-`sourcerom/supermariobros.nes`, Super Mario Bros. (Japan, USA). NROM, 32K
-PRG, 8K CHR ROM. Needs 240K of RAM.
-
-```
-make ROM=supermariobros
-make run ROM=supermariobros
-make discover ROM=supermariobros
-```
-
-Uses the sprite-0 split for the status bar. The attract mode and normal play
-run without stops.
-
-### Contra
-
-`sourcerom/contra.nes`, Contra (USA). UxROM, 128K PRG, CHR RAM. Needs 368K
-of RAM.
-
-```
-make ROM=contra
-make run ROM=contra
-# headless discovery on all 8 stages with 9 lives
-# (NES RAM $32 = lives, $30 = stage)
-make discover ROM=contra DISCOVER_SECS=100 \
-  DISCOVER_POKES="32=09,30=00;32=09,30=01;32=09,30=02;32=09,30=03;32=09,30=04;32=09,30=05;32=09,30=06;32=09,30=07"
-```
-
-### Double Dragon II: The Revenge
-
-`sourcerom/doubledragonii.nes`, Double Dragon II (USA). MMC3, 128K PRG,
-128K CHR ROM. Needs 432K of RAM. The CHR ROM stays in the cartridge and is
-read from there when the game switches banks.
-
-```
-make ROM=doubledragonii
-make run ROM=doubledragonii
-# headless discovery: presses Start through the intro and menus
-# (DISCOVER_PLAY=2), infinite lives ($0432) on each difficulty ($0422)
-make discover ROM=doubledragonii DISCOVER_PLAY=2 DISCOVER_SECS=240 \
-  DISCOVER_POKES="432=09;432=09,422=01;432=09,422=02"
-```
-
-Uses scanline IRQ splits for the status bar, CHR banks for the screen
-graphics and a lag-frame model: when the main loop is late, the NMI waits
-for it. The game then slows down instead of showing half-built frames.
-Automated play reaches the end of mission 1. Later missions are reached only
-by playing.
+The jump targets found so far are in
+`samples/entries.b6b07ee76492ed475f39167c89b342353f999231.txt`.
 
 ## Controls
 
@@ -293,7 +221,7 @@ make itch VERSION=1.0     # zip the tool (no ROMs) into dist/ for itch.io
 
 Windows install, generating a ROM, the NROM happy path, and the
 discover/crash/replay workflow for other mappers:
-[docs/ITCH.md](docs/ITCH.md).
+[docs/HOWTO_WINDOWS.md](docs/HOWTO_WINDOWS.md).
 
 ## How it works
 

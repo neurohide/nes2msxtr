@@ -11,7 +11,7 @@
 #   make replay ROM=... REPLAY=...   play a saved replay back and report the crash
 #   make discover ROM=...            play the attract mode headless and add the
 #                                    computed-jump targets the tracer missed to
-#                                    build/<game>/entries.txt (make run adds the
+#                                    build/<game>/entries.<rom-sha1>.txt (make run adds the
 #                                    ones real play reaches when it stops on them;
 #                                    DISCOVER_POKES="32=09,30=00;..." adds play runs
 #                                    with NES RAM bytes held, e.g. lives / level;
@@ -23,19 +23,33 @@
 
 ROM ?= testrom/testrom.nes
 SOURCEROM ?= sourcerom
-ROMFILE := $(firstword $(wildcard $(ROM) $(SOURCEROM)/$(ROM) $(SOURCEROM)/$(ROM).nes) $(ROM))
-OUT ?= build/$(basename $(notdir $(ROMFILE)))
-SAMPLES := contra doubledragonii supermariobros
+empty :=
+space := $(empty) $(empty)
+escape = $(subst $(space),\$(space),$(1))
+ROMFILE_RAW := $(shell python3 -c 'import os,sys; r,d=sys.argv[1:]; p=(r,os.path.join(d,r),os.path.join(d,r+".nes")); print(next((x for x in p if os.path.isfile(x)),r))' "$(ROM)" "$(SOURCEROM)")
+ROMFILE := $(call escape,$(ROMFILE_RAW))
+ROM_NAME_RAW := $(shell basename "$(ROMFILE_RAW)" .nes)
+ROM_NAME := $(call escape,$(ROM_NAME_RAW))
+OUT ?= build/$(ROM_NAME_RAW)
+OUT_ESC := $(call escape,$(OUT))
+SPLASH ?= assets/0-nes-to-msx-turbor.png
+ROM_SIGNATURE := $(shell python3 -c 'import hashlib,sys; print(hashlib.sha1(open(sys.argv[1],"rb").read()).hexdigest())' "$(ROMFILE_RAW)")
+ROM_ENTRIES := $(OUT)/entries.$(ROM_SIGNATURE).txt
+ROM_ENTRIES_ESC := $(call escape,$(ROM_ENTRIES))
+OUT_ENTRIES := $(shell test -f "$(ROM_ENTRIES)" && printf '%s' "$(ROM_ENTRIES_ESC)")
+SAMPLES := nova
 FRAMES ?= 210
 PROFILE_SECS ?= 40
 
-all: $(OUT)/$(basename $(notdir $(ROMFILE))).rom
+all: $(OUT_ESC)/$(ROM_NAME).rom
 
-$(OUT)/%.rom: $(ROMFILE) tools/*.py runtime/*.asm $(wildcard $(OUT)/entries.txt)
-	@if [ ! -f $(OUT)/entries.txt ] && [ -f samples/$*.entries.txt ]; then \
-	    mkdir -p $(OUT); cp samples/$*.entries.txt $(OUT)/entries.txt; \
-	    echo "using samples/$*.entries.txt (jump targets found by playing)"; fi
-	python3 tools/nes2msxtr.py $(ROMFILE) $(OUT)
+$(OUT_ESC)/$(ROM_NAME).rom: Makefile $(ROMFILE) tools/*.py runtime/*.asm $(OUT_ENTRIES)
+	@if [ ! -f "$(ROM_ENTRIES)" ]; then \
+	    sample="samples/entries.$(ROM_SIGNATURE).txt"; \
+	    if [ ! -f "$$sample" ]; then sample="samples/$(ROM_NAME_RAW).entries.txt"; fi; \
+	    if [ -f "$$sample" ]; then mkdir -p "$(OUT)"; cp "$$sample" "$(ROM_ENTRIES)"; \
+	        echo "using $$sample (jump targets found by playing)"; fi; fi
+	python3 tools/nes2msxtr.py "$(ROMFILE_RAW)" "$(OUT)" --splash "$(SPLASH)"
 
 testrom/testrom.nes testrom/stacktest.nes testrom/uxtest.nes testrom/mmc3test.nes: testrom/*.s testrom/*.cfg testrom/mkchr.py
 	$(MAKE) -C testrom
@@ -107,11 +121,11 @@ DISCOVER_SECS ?= 90
 DISCOVER_POKES ?=
 DISCOVER_PLAY ?= 1
 discover:
-	DISCOVER_POKES="$(DISCOVER_POKES)" DISCOVER_PLAY="$(DISCOVER_PLAY)" python3 tools/discover.py $(ROMFILE) $(OUT) $(DISCOVER_SECS) 60
+	DISCOVER_SPLASH="$(SPLASH)" DISCOVER_POKES="$(DISCOVER_POKES)" DISCOVER_PLAY="$(DISCOVER_PLAY)" python3 tools/discover.py "$(ROMFILE_RAW)" "$(OUT)" $(DISCOVER_SECS) 60
 
 # Interactive; a crash (or F11) saves build/<game>/crash-*.omr/.rom/.txt.
 run: all
-	OPENMSX=$(OPENMSX) tools/omsx/view.sh $(OUT)/$(basename $(notdir $(ROMFILE))).rom $(OUT)
+	OPENMSX="$(OPENMSX)" tools/omsx/view.sh "$(OUT)/$(ROM_NAME_RAW).rom" "$(OUT)"
 
 # Play a saved session back headless: make replay ROM=... REPLAY=build/<game>/crash-1.omr
 # (uses the cartridge saved next to the replay, so later rebuilds don't matter)

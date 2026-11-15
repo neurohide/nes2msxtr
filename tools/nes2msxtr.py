@@ -6,10 +6,11 @@ usage: nes2msxtr.py game.nes out_dir [--crop N] [--bank-kb N] [--pad-kb N] [--sp
 
 Only use this on games you have the rights to port.
 """
-import argparse, math, os, subprocess, sys
+import argparse, hashlib, math, os, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RUNTIME = os.path.join(os.path.dirname(HERE), "runtime")
+FORCE_FAITHFUL = False
 sys.path.insert(0, HERE)
 import nestrace
 
@@ -99,7 +100,7 @@ class Translator:
         self.entries = set(P.labels)
         # TSX reads the real stack: JSR/RTS then also keep 6502 return
         # addresses in the page-1 stack, not just on the Z80 stack
-        self.faithful = any(d[1] == "TSX" for d in P.code.values())
+        self.faithful = FORCE_FAITHFUL or any(d[1] == "TSX" for d in P.code.values())
         self.nz_dead, self.c_dead, self.nz_live, self.succ = flag_liveness(P)
         # an NMI handler that pulls its interrupt frame and the bytes below
         # it, then RTS, returns from the routine it interrupted (a wait
@@ -225,10 +226,38 @@ class Translator:
             clr, hit = "BVS", "BVC"
         else:
             return h
-        if b not in code: return h
+        return self.s0_poll(a, b, clr, hit) or h
+
+    def s0_poll(self, a, b, clr, hit):
+        """Handler for the $2002 poll at a whose branch is at b, or None.
+
+        The loop may carry a timeout counter (LDX #0 / INX / BEQ out / poll /
+        BNE back, Castlevania): the branch goes back to a spot reached only
+        through counter steps, branches and other polls. A forward branch out
+        of such a loop (BNE out on the hit) is accepted when the next
+        instruction is a poll that loops back.
+        """
+        code = self.P.code
+        if b not in code: return None
         _, m2, mode2, arg2 = code[b]
-        if mode2 != "rel" or nestrace.branch_target(b, arg2) != a: return h
-        return {clr: "io_r_2002_s0clr", hit: "io_r_2002_s0hit"}.get(m2, h)
+        if mode2 != "rel": return None
+        t = nestrace.branch_target(b, arg2)
+        h = {clr: "io_r_2002_s0clr", hit: "io_r_2002_s0hit"}
+        if t <= a:
+            x = t
+            while x < a:
+                if x not in code: return None
+                n, m, mode, arg = code[x]
+                if not (m in ("INX", "INY", "DEX", "DEY", "NOP", "AND", "BIT") or mode == "rel"
+                        or (m == "LDA" and mode == "abs" and arg == 0x2002)): return None
+                x += n
+            return h.get(m2) if x == a else None
+        nxt = b + 2
+        n, m, mode, arg = code.get(nxt, (0, None, None, None))
+        if m == "LDA" and mode == "abs" and arg == 0x2002 and m2 == clr \
+                and code.get(nxt + 3, (0, None, None, None))[1:] == ("AND", "imm", 0x40):
+            return self.s0_poll(nxt, nxt + 5, clr, hit) == h[hit] and h[hit] or None
+        return None
 
     def jump(self, t):
         """JMP to NES address t from the current instruction"""
@@ -247,6 +276,29 @@ class Translator:
         L = ["ld hl,(s6_ptr)"] + ["dec l"] * len(vals) + ["ld (s6_ptr),hl"]
         for v in reversed(vals): L += ["inc l", f"ld (hl),{v}"]
         return L
+
+    def eng_marked(self):
+        """Some dispatcher call is preceded by PHA/PHA (see eng_s6)."""
+        if not hasattr(self, "_eng_marked"):
+            c = self.P.code
+            self._eng_marked = any(
+                d[1] == "JSR" and self.mem.at(a, d[3]) in self.P.engines and self.pushed_before(a) >= 2
+                for a, d in c.items())
+        return self._eng_marked
+
+    def pushed_before(self, a):
+        """PHAs (minus PLAs) in the straight-line code just before a."""
+        code, n = self.P.code, 0
+        for _ in range(8):
+            for k in (1, 2, 3):
+                if code.get(a - k, (0,))[0] == k: break
+            else: break
+            a -= k
+            m = code[a][1]
+            if m == "PHA": n += 1
+            elif m == "PLA": n -= 1
+            elif m in nestrace.ENDS_FLOW or m in ("JSR", "BRK") or code[a][2] == "rel": break
+        return n
 
     @staticmethod
     def pull_a(k=1):
@@ -298,6 +350,11 @@ class Translator:
                 self.warn.append(f"${a:04X}: RTS dispatch with unknown targets (resolved at run time)")
             # rts_sw: a path that reaches this RTS without the two pushes (a
             # range check skipping the table) returns through its own frame
+            if self.multi and not self.faithful and self.eng_marked() \
+                        and self.pushed_before(a) < 2:
+                # the two bytes come from the caller (a dispatcher case); when
+                # it was reached by a plain JSR instead, nothing was pushed
+                return ["jp rts_eng"]
             return ["jp rts_sw"]
         if m == "RTS" and (d > 0 or d % 2):     # -2k: k return frames dropped
             self.warn.append(f"${a:04X}: RTS at stack depth {d} not supported")
@@ -519,6 +576,11 @@ class Translator:
             ret = (a + 2) & 0xFFFF
             t = self.mem.at(a, arg)
             if t is not None and (t in self.P.engines or t in self.P.inline):
+                if self.multi and not self.faithful and self.pushed_before(a) >= 2:
+                    # the caller pushed the case's return address (PHA/PHA, then
+                    # JSR dispatcher): a case's PLA/PLA pops these bytes, not a
+                    # Z80 frame. drop_frame compares s6_ptr with this mark.
+                    L += ["call eng_mark"]
                 L += self.push_bytes([ret >> 8, ret & 0xFF]) + [("JP", t)]
                 return L, False
             if self.faithful: L += self.push_bytes([ret >> 8, ret & 0xFF])
@@ -813,7 +875,7 @@ def spr_src(chr_):
     return bytes(v)
 
 def read_png(path):
-    """Indexed-colour PNG -> (width, height, rows of palette indices, [(r, g, b)])."""
+    """Indexed or 8-bit RGB PNG -> dimensions, pixel rows, and RGB palette."""
     d = open(path, "rb").read()
     if d[:8] != b"\x89PNG\r\n\x1a\n": sys.exit(f"{path}: not a PNG file")
     p, idat, pal = 8, b"", []
@@ -825,9 +887,12 @@ def read_png(path):
         elif t == b"IDAT": idat += c
         p += 12 + n
     w, h = int.from_bytes(w, "big"), int.from_bytes(h, "big")
-    if ctype != 3 or lace: sys.exit(f"{path}: must be an indexed-colour, non-interlaced PNG")
+    if lace or ctype not in (2, 3) or (ctype == 2 and depth != 8):
+        sys.exit(f"{path}: must be indexed or 8-bit RGB, non-interlaced PNG")
     import zlib
-    raw, stride, bpp = zlib.decompress(idat), (w * depth + 7) // 8, max(1, depth // 8)
+    raw = zlib.decompress(idat)
+    stride = w * 3 if ctype == 2 else (w * depth + 7) // 8
+    bpp = 3 if ctype == 2 else 1
     rows, prev, k = [], bytearray(stride), 0
     for _ in range(h):
         f, line = raw[k], bytearray(raw[k + 1:k + 1 + stride]); k += 1 + stride
@@ -841,7 +906,10 @@ def read_png(path):
                 pa, pb, pc = abs(b - cc), abs(a - cc), abs(a + b - 2 * cc)
                 line[i] = (line[i] + (a if pa <= pb and pa <= pc else b if pb <= pc else cc)) & 255
         prev = line
-        rows.append([(line[x * depth // 8] >> (8 - depth - x * depth % 8)) & ((1 << depth) - 1) for x in range(w)])
+        if ctype == 2:
+            rows.append([tuple(line[x * 3:x * 3 + 3]) for x in range(w)])
+        else:
+            rows.append([(line[x * depth // 8] >> (8 - depth - x * depth % 8)) & ((1 << depth) - 1) for x in range(w)])
     return w, h, rows, pal
 
 def splash_bin(path):
@@ -849,6 +917,32 @@ def splash_bin(path):
     $0000: 212 lines x 128 bytes, the picture centred on colour 0;
     $6A00: 16 palette entries, 5-bit R, G, B."""
     w, h, rows, pal = read_png(path)
+    if not pal:
+        from collections import Counter
+        colors = Counter(c for row in rows for c in row)
+        boxes = [list(colors.items())]
+        while len(boxes) < 16:
+            split = max((i for i, box in enumerate(boxes) if len(box) > 1),
+                        key=lambda i: max(max(c[ch] for c, _ in boxes[i]) - min(c[ch] for c, _ in boxes[i])
+                                          for ch in range(3)) * sum(n for _, n in boxes[i]), default=-1)
+            if split < 0:
+                break
+            box = boxes.pop(split)
+            channel = max(range(3), key=lambda ch: max(c[ch] for c, _ in box) - min(c[ch] for c, _ in box))
+            box.sort(key=lambda item: item[0][channel])
+            halfway, total = sum(n for _, n in box) / 2, 0
+            cut = 1
+            for cut, (_, n) in enumerate(box, 1):
+                total += n
+                if total >= halfway:
+                    break
+            cut = min(max(cut, 1), len(box) - 1)
+            boxes.extend((box[:cut], box[cut:]))
+        pal = [tuple((sum(c[ch] * n for c, n in box) + sum(n for _, n in box) // 2) //
+                     sum(n for _, n in box) for ch in range(3)) for box in boxes]
+        indices = {c: min(range(len(pal)), key=lambda i: sum((c[ch] - pal[i][ch]) ** 2 for ch in range(3)))
+                   for c in colors}
+        rows = [[indices[c] for c in row] for row in rows]
     if w != 256 or h > 212 or len(pal) > 16 or max(map(max, rows)) > 15:
         sys.exit(f"{path}: the boot picture must be 256 pixels wide, at most 212 high, 16 colours")
     top, bg = (212 - h) // 2, 0
@@ -889,8 +983,38 @@ def read_entries(path, mem):
             out.append(a)
     return out
 
-def build(rom_path, out_dir, crop, bank_kb, pad_kb=0, splash=None):
+def interp_bank():
+    """Source of the interpreter bank (runtime/interp.asm): preamble, opcode table, stubs."""
+    mem = {"LDA", "LDX", "LDY", "AND", "ORA", "EOR", "ADC", "SBC", "CMP", "CPX", "CPY", "BIT",
+           "STA", "STX", "STY", "ASL", "LSR", "ROL", "ROR", "INC", "DEC"}
+    tab, stubs = [], []
+    for op in range(256):
+        m = nestrace.OPS.get(op)
+        if m is None or m[0] in ("BRK", "RTI", "SLO", "RRA", "AHX", "SHY"):
+            tab.append("x_bad")
+            continue
+        mn, mode = m
+        x = mn.lower()
+        if mode in ("imp", "rel") or mn in ("JMP", "JSR"):
+            tab.append("x_jmpi" if mode == "ind" else f"x_{x}")
+        elif mode == "acc":
+            tab.append(f"x_{x}_a")
+        else:
+            tab.append(f"s_{op:02x}")
+            stubs += [f"s_{op:02x}:", f"        call am_{mode}",
+                      f"        jp {'x_' + x if mn in mem else 'x_nop_m'}"]
+    t = ["        dw " + ", ".join(tab[i:i + 8]) for i in range(0, 256, 8)]
+    src = open(os.path.join(RUNTIME, "interp.asm")).read()
+    pre = ["        org $0000", "        jp crash", "        defs $0038 - $, 0",
+           "        jp isr", "        defs $0100 - $, 0"]
+    body = src.replace(";@TABLE@", "\n".join(t + stubs))
+    return "\n".join(pre) + "\n" + body + "\n        defs $8000 - $, $ff\n"
+
+
+def build(rom_path, out_dir, crop, bank_kb, pad_kb=0, splash=None, interp=True):
     rom = open(rom_path, "rb").read()
+    signature = hashlib.sha1(rom).hexdigest()
+    entries_path = os.path.join(out_dir, f"entries.{signature}.txt")
     if rom[:4] != b"NES\x1a": sys.exit("not an iNES file")
     mapper = (rom[6] >> 4) | (rom[7] & 0xF0)
     kind = {0: "nrom", 1: "mmc1", 2: "uxrom", 4: "mmc3"}.get(mapper)
@@ -926,8 +1050,19 @@ def build(rom_path, out_dir, crop, bank_kb, pad_kb=0, splash=None):
         wram = 0x2000 if kind in ("mmc1", "mmc3") or rom[6] & 2 else 0
     wram_banks = min(4 if kind == "mmc1" else 1, max(1, wram // 0x2000)) if wram else 0
 
-    extra = read_entries(os.path.join(out_dir, "entries.txt"), nestrace.Mem(prg, kind))
+    extra = read_entries(entries_path, nestrace.Mem(prg, kind))
     P = nestrace.trace(prg, kind, extra)
+    # code only reached through pointers the tracer can't follow, found in
+    # the tables and pointer stores of the code traced so far (see
+    # nestrace.ptr_tables); traced like entries.txt lines, until no more
+    static = set()
+    for _ in range(8):
+        found = nestrace.ptr_tables(P) - set(P.code) - set(extra)
+        if not found: break
+        static |= found
+        extra = extra + sorted(found)
+        P = nestrace.trace(prg, kind, extra)
+    P.static = static
     cap = bank_kb * 1024 - 0x100
     items = None
     for multi in ((True,) if bank_kb < 32 or ux else (False, True)):
@@ -942,7 +1077,8 @@ def build(rom_path, out_dir, crop, bank_kb, pad_kb=0, splash=None):
 
     # logical segments: code banks (2 each), then data
     segs = []
-    for i in range(len(banks)): segs += [f"bank{i}:lo", f"bank{i}:hi"]
+    nbk = len(banks) + interp         # the interpreter is the last bank
+    for i in range(nbk): segs += [f"bank{i}:lo", f"bank{i}:hi"]
     def add(name): segs.append(name); return SEG_BASE + len(segs) - 1
     # PRG: one segment per 16K bank; DSEG_PRG1 is the one at $C000
     d_prg0 = add("prg0")
@@ -986,6 +1122,7 @@ def build(rom_path, out_dir, crop, bank_kb, pad_kb=0, splash=None):
         sys.exit(f"needs {ram_k}K of mapper RAM; at most 4080K is supported")
 
     os.makedirs(out_dir, exist_ok=True)
+    open(os.path.join(out_dir, "rom.sha1"), "w").write(signature + "\n")
     w = lambda name, data: open(os.path.join(out_dir, name), "wb" if isinstance(data, bytes) else "w").write(data)
     for i in range(prg_n): w(f"prg{i}.bin", prg[i * 0x4000: (i + 1) * 0x4000])
     sp = spr_src(chr_)
@@ -1031,7 +1168,7 @@ def build(rom_path, out_dir, crop, bank_kb, pad_kb=0, splash=None):
         f"CHR_MASK: equ {max(1, len(chr_rom) // 0x400) - 1}", f"FAITHFUL: equ {int(T.faithful)}",
         f"RAM_SEGS: equ {SEG_BASE + nsegs}", f"DEFER_DMA: equ {int(bool(T.polls))}",
         f"RESET_BANK: equ {bank_of[reset]}", f"SPLASH: equ {int(bool(splash))}",
-        f"SPLASH_BANK: equ {bg_bank + 4}", ""]))
+        f"SPLASH_BANK: equ {bg_bank + 4}", f"INTERP: equ {int(interp)}", f"INTERP_BANK: equ {len(banks)}", ""]))
 
     # page-3 tables
     pal = nes_palette()
@@ -1065,6 +1202,7 @@ def build(rom_path, out_dir, crop, bank_kb, pad_kb=0, splash=None):
     t += ["s0row:"] + db_lines(s0)
     t += ["spr_lut_src:"] + db_lines(lut)
     w("tables.asm", "\n".join(t) + "\n")
+    if interp: w("interp.asm", interp_bank())
 
     main = [f'        include "config.asm"', f'        include "{RUNTIME}/defs.asm"',
             "        org $4000", f'        include "{RUNTIME}/boot.asm"', "blob_src:",
@@ -1073,7 +1211,8 @@ def build(rom_path, out_dir, crop, bank_kb, pad_kb=0, splash=None):
     main += ['        include "tables.asm"', "blob_end:",
              "        org blob_src + (blob_end - blob_start)", "        defs $8000 - $, $ff"]
     main += [f'        include "bank{i}.asm"' for i in range(len(banks))]
-    for s in segs[2 * len(banks):]:
+    if interp: main.append('        include "interp.asm"')
+    for s in segs[2 * nbk:]:
         if s == "misc":
             main += ['        org $8000', '        incbin "chr.bin"']
             main += ['        include "dyn.asm"' if d_dyn == d_misc else '        defs $C000 - $, $ff']
@@ -1116,7 +1255,7 @@ def build(rom_path, out_dir, crop, bank_kb, pad_kb=0, splash=None):
               f"stack: {'faithful (TSX used: JSR return addresses kept in page 1)' if T.faithful else 'data only in page 1'}",
               f"code banks: {len(banks)} ({'multi-bank' if multi else 'single bank'})"
               + (f", hot copies from profile.txt ({len(profile)} edges)" if multi and profile else ""),
-              f"entry points from entries.txt: {len(P.extra)}",
+              f"entry points from entries.txt: {len(P.extra) - len(P.static)}, found in pointer tables: {len(P.static)}",
               f"mapper segments used: {SEG_BASE}..{SEG_BASE + nsegs - 1} ({ram_k}K RAM needed"
               + (", more than the turboR's 512K: runs from a RAM expansion (memory mapper)" if ram_k > 512 else "") + ")",
               f"runtime blob: ${0xD700:04X}-${blob_end:04X}", f"cartridge: {name}, {size // 1024}K ASCII16",
@@ -1134,5 +1273,7 @@ if __name__ == "__main__":
     ap.add_argument("--pad-kb", type=int, default=0, help="unused RAM to add (testing RAM expansions)")
     ap.add_argument("--splash", default=os.path.join(os.path.dirname(HERE), "assets", "0-nes-to-msx-turbor.png"),
                     help="picture shown for 3 s at boot (256 wide, up to 212 high, 16-colour PNG; '' for none)")
+    ap.add_argument("--no-interp", action="store_true",
+                    help="no 6502 interpreter bank: a jump to an untraced address stops (discover.py uses this)")
     a = ap.parse_args()
-    build(a.rom, a.out, a.crop, a.bank_kb, a.pad_kb, a.splash)
+    build(a.rom, a.out, a.crop, a.bank_kb, a.pad_kb, a.splash, not a.no_interp)

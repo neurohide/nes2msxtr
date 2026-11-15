@@ -10,7 +10,7 @@
 ;   a view that crosses the NES wrap (line 480 -> 0) never crosses the map's
 ;   own wrap at 512 (calc_scroll picks the half). A game that scrolls X
 ;   needs both halves the same: from its first X scroll on (hm_dup), the
-;   right half is a plain copy again, and the wrap can show 4 blank rows.
+;   right half is a plain copy again, and rows 60-63 repeat rows 0-3.
 ; Sprites: NES sprite i -> V9990 sprite i, pattern slot i, uploaded on
 ; change (palette and flips baked in; V9990 sprites cannot flip).
 ; Palette: NES palette index i -> V9990 palette entry i (sprites use
@@ -45,6 +45,25 @@ io_w_2001:
 
 ; (ppu_mask) -> V9990 R#8 (display / sprite enable). Interrupts off.
 mask_apply:
+        ld a, (ppu_mask)
+        and $08
+        jr z, ma_bg_off
+        ld a, (bg_masked)
+        or a
+        jr z, ma_display
+        call bg_palette_restore
+        xor a
+        ld (bg_masked), a
+        jr ma_display
+ma_bg_off:
+        ld a, (bg_masked)
+        or a
+        jr nz, ma_display
+        call bg_palette_blank
+        ld a, 1
+        ld (bg_masked), a
+        jr ma_display
+ma_display:
         ld a, (ppu_mask)
         ld h, $02
         and $18
@@ -376,6 +395,53 @@ pw_pal: call pal_index
         and $3F
         ld (hl), a
         ld e, l
+        ld a, (bg_masked)
+        or a
+        jr z, pw_pal_apply
+        ld a, e
+        cp 16
+        jr nc, pw_pal_apply
+        or a
+        jr nz, pw_pal_skip
+        call bg_palette_blank
+        ret
+pw_pal_apply:
+        ld a, (wr_val)
+        and $3F
+        jp pal_set
+pw_pal_skip:
+        ret
+
+; P1 cannot disable layer A separately from sprites. When the NES hides BG,
+; match its palette to the universal backdrop; keep PAL_SHADOW intact.
+bg_palette_blank:
+        ld a, (PAL_SHADOW)
+        ld d, 16
+        ld e, 0
+bp_blank:
+        push af
+        call pal_set
+        pop af
+        inc e
+        dec d
+        jr nz, bp_blank
+        ret
+
+bg_palette_restore:
+        ld hl, PAL_SHADOW
+        ld d, 16
+        ld e, 0
+bp_restore:
+        ld a, (hl)
+        push hl
+        call pal_set
+        pop hl
+        inc hl
+        inc e
+        dec d
+        jr nz, bp_restore
+        ret
+
 ; A = NES colour, E = palette index: load V9990 palette entry E.
 pal_set:
         ld l, a
@@ -646,11 +712,13 @@ endif
 ; Rebuild the tiles written since the last flush (one bit per tile in
 ; chr_dirty): the 4 palette copies of the background pattern in VRAM, the
 ; sprite source rows (spr0/spr1) and s0row. Then the sprite pattern cache
-; is emptied, so every sprite is uploaded again from the new tiles.
+; is emptied, so every sprite is uploaded again from the new tiles. Limit
+; each vblank to 4 tiles; leave remaining dirty bits queued for the next.
 ; Interrupts off; clobbers everything but IX/IY.
 chr_flush:
         xor a
         ld (chr_any), a
+        ld (cf_count), a
         ld hl, chr_dirty
         ld a, 64
 cf_byte:
@@ -658,7 +726,6 @@ cf_byte:
         ld a, (hl)
         or a
         jr z, cf_next
-        ld (hl), 0
         push hl
         ld c, a                 ; tiles left in this byte
         ld a, (cf_left)
@@ -671,19 +738,43 @@ cf_byte:
         add hl, hl              ; first tile of the byte
         ld b, 8
 cf_bit: srl c
+        jr nc, cf_skip
         push bc
         push hl
-        call c, chr_tile
+        call chr_tile
         pop hl
         pop bc
+        ld a, (cf_count)
+        inc a
+        ld (cf_count), a
+        cp 4
+        jr z, cf_partial
+cf_skip:
         inc hl
         djnz cf_bit
         pop hl
+        xor a
+        ld (hl), a
 cf_next:
         inc hl
         ld a, (cf_left)
         dec a
         jr nz, cf_byte
+        jr cf_done
+cf_partial:
+        ld a, 9                 ; restore the remaining bits to their slots
+        sub b                   ; B still counts the current and later bits
+        ld d, a
+cf_restore:
+        sla c
+        dec d
+        jr nz, cf_restore
+        pop hl
+        ld (hl), c
+        ld a, 1                  ; resume remaining CHR work next vblank
+        ld (chr_any), a
+        ret
+cf_done:
         ld hl, SC_THI           ; empty the sprite pattern cache
         ld de, SC_THI + 1
         ld bc, $FF
@@ -964,7 +1055,23 @@ nc_h0:  ld b, a
         ld c, a
         ld a, (hm_dup)
         or a
-        jp nz, nt_emit
+        jr z, nc_hdifferent
+        call nt_emit
+        ld a, b
+        cp 4
+        ret nc
+        ld a, c
+        sub 32
+        ld c, a
+        ld a, b
+        add a, 60
+        ld b, a
+        call nt_emit
+        ld a, c
+        add a, 32
+        ld c, a
+        jp nt_emit
+nc_hdifferent:
         ld a, b                 ; right half: the other nametable order
         sub 30
         jr nc, nc_h1
@@ -974,6 +1081,7 @@ nc_h1:  ld b, a
 
 hm_dup: db 0                    ; horizontal mirroring: right half = left
 vm_dup: db CROP > 28            ; vertical mirroring: rows 30-59 = rows 0-29
+bg_masked: db 0                 ; BG palette hidden while NES $2001 bit 3 is clear
 
 ; B = map row, C = map column: write (nt_tile, nt_ehi). Preserves BC, DE.
 nt_emit:

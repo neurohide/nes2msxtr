@@ -86,7 +86,7 @@ bad_bank:   equ VARS+73         ; ... when bad_addr was looked up
 chr_any:    equ VARS+74         ; CHR RAM: some tile in chr_dirty
 cf_left:    equ VARS+75         ; chr_flush scratch
 ct_t:       equ VARS+76         ; word: chr_tile scratch
-ct_s0:      equ VARS+78
+cf_count:   equ VARS+78         ; CHR tiles rebuilt in this frame
 ct_hi:      equ VARS+79
 ct_lo:      equ VARS+80
 bg_shown:   equ VARS+81         ; BG pattern table in the V9990 map (0 / 4)
@@ -104,6 +104,7 @@ idle_age:   equ VARS+92         ; vblanks since the main loop's last idle point
 brk_n:      equ VARS+93         ; MMC1: BRK software interrupts being handled
 brk_ctx:    equ VARS+94         ; ... in_nmi when the last one started
 pad_strobe: equ VARS+95         ; NES controller strobe state
+eng_s6:     equ APU + $50       ; 8 x (s6_ptr, call site, SP): dispatcher calls whose case returns through pushed bytes
 
 ; V9990 ports (GFX9000 at $60)
 V_VRAM:     equ $60

@@ -203,6 +203,23 @@ def trace(prg, kind="nrom", extra=()):
         arg = rd(canon(a + 1)) if n == 2 else rw(canon(a + 1)) if n == 3 else None
         return n, m, mode, arg
 
+    def call_candidate(start):
+        """A conservative linear check for code at an unknown banked call."""
+        a, seen = start, set()
+        for _ in range(48):
+            if a in seen or not inrom(a): return False
+            seen.add(a)
+            d = decode(a)
+            if d is None or d[1] == "BRK": return False
+            n, m, mode, arg = d
+            if m in ("RTS", "RTI") or (m == "JMP" and mode == "ind"): return True
+            if m == "JMP":
+                a = mem.at(a, arg)
+                if a is None: return False
+            else:
+                a = nxt(a, n)
+        return False
+
     P = Program()
     P.mem = mem
     P.xbank, P.dbank = {}, {}
@@ -215,7 +232,16 @@ def trace(prg, kind="nrom", extra=()):
             return [v] if v is not None else []
         v = mem.at(site, t)
         if v is not None: return [v] if inrom(v) else []
-        return [mem.banked(t, b) for b in sorted(P.xbank.get(site) or ())]
+        bk = P.xbank.get(site)
+        if bk is None:
+            if site not in P.xbank: return []
+            n = mem.nbanks - (2 if mem.mmc3 else 1)
+            out = []
+            for b in range(n):
+                v = mem.banked(t, b)
+                if call_candidate(v): out.append(v)
+            return out
+        return [mem.banked(t, b) for b in sorted(bk)]
     P.vectors = {"NMI": rw(0xFFFA), "RESET": rw(0xFFFC), "IRQ": rw(0xFFFE)}
 
     # Recover zeroed vectors: scan for the SEI; CLD reset prologue
@@ -250,20 +276,30 @@ def trace(prg, kind="nrom", extra=()):
         skips = set()    # BIT instructions that hide the next instruction
         tbl = set()      # ROM addresses read as data (LDA table,Y ...)
         work = list(entries)
+        spec, spec_starts = [], set()    # unknown-bank candidates: traced last, silently dropped on overlap
 
         def nop_lands(a):
             # an unofficial NOP ending where traced code starts (padding run
             # into a routine, e.g. ahead of the NMI handler) is no data
             o = OPS.get(rd(a))
             return o is not None and o[0] == "NOP" and (nxt(a, MODES[o[1]]) in labels or nxt(a, MODES[o[1]]) in entries)
-        while work:
-            a = start = work.pop()
+
+        def nop_before_return(a):
+            # Keep pointer-table validation and tracing consistent for a
+            # one-byte unofficial NOP immediately before an RTS/RTI.
+            o = OPS.get(rd(a))
+            if rd(a) not in UNOFFICIAL or o is None or o[0] != "NOP": return False
+            end = nxt(a, MODES[o[1]])
+            following = decode(end) if inrom(end) else None
+            return following is not None and following[1] in ("RTI", "RTS")
+        while work or spec:
+            a = start = work.pop() if work else spec.pop()
             imm = None
             prev = ()
             after_skip = False
             while inrom(a) and a not in code:
                 d = decode(a) if rd(a) not in UNOFFICIAL or a in unoff or a in labels or a in entries \
-                    or nop_lands(a) else None
+                    or nop_lands(a) or nop_before_return(a) else None
                 if d is None:
                     warns.append(f"invalid opcode ${rd(a):02X} at ${a:04X} (path from ${start:04X})"); break
                 n, m, mode, arg = d
@@ -273,7 +309,8 @@ def trace(prg, kind="nrom", extra=()):
                 # past them.
                 inner = [canon(a + i) for i in range(1, n) if canon(a + i) in code]
                 if m not in SKIPS and any(code[x][1] not in SKIPS and x not in soft for x in inner):
-                    warns.append(f"overlapping instruction at ${a:04X}"); break
+                    if a != start or start not in spec_starts: warns.append(f"overlapping instruction at ${a:04X}")
+                    break
                 code[a] = d
                 if after_skip: soft.add(a)
                 after_skip = m in SKIPS
@@ -282,8 +319,11 @@ def trace(prg, kind="nrom", extra=()):
                 if mode == "rel":
                     t = branch_target(a, arg); labels.add(t); work.append(t)
                 elif m in ("JMP", "JSR") and mode == "abs":
+                    guess = mem.ux and not mem.mmc3 and mem.at(a, arg) is None and P.xbank.get(a) is None
                     for t in targets(a, arg):
-                        labels.add(t); work.append(t)
+                        labels.add(t)
+                        if guess and t not in entries: spec.append(t); spec_starts.add(t)
+                        else: work.append(t)
                         if m == "JSR": calls.add(t)
                 if m == "BRK" and mem.mmc1:
                     # The MMC1 IRQ handler advances the stacked PC past the
@@ -424,11 +464,26 @@ def trace(prg, kind="nrom", extra=()):
             while (t & 0xFFFF) <= 0xFFF9 and inrom(t):
                 if tg and t in code: break
                 w = mem.at(c, rw(t))
+                if w is None and mem.ux and not mem.mmc3 and mem.slot(rw(t)) is not None:
+                    # a case in the switchable half, called from the fixed bank:
+                    # its bank is only known at run time, so trace every bank
+                    # where the address holds code (Castlevania's stage tables)
+                    # (only the bank holding most of the traced code: the others
+                    # collide with entries.txt code, e.g. the sound driver's bank)
+                    cnt = {}
+                    for x in code:
+                        if x >> 16: cnt[(x >> 16) - 1] = cnt.get((x >> 16) - 1, 0) + 1
+                    top = max(cnt.values(), default=0)
+                    cand = [v for v in (mem.banked(rw(t), b) for b in range(mem.nbanks - 1) if cnt.get(b, 0) == top)
+                            if call_candidate(v)]
+                    if not cand: break
+                    tg += [v for v in cand if v not in tg]; t = canon(t + 2)
+                    continue
                 if w is None or not inrom(w) or c + 3 <= w < t + 2: break
                 if tg and any(t <= x < t + 2 for x in tg): break
                 tg.append(w); t = canon(t + 2)
             tables[c] = tg
-        dispatch = _find_dispatch(code, engines, decode, mem, P.dbank)
+        dispatch = _find_dispatch(code, engines, tables, decode, mem, P.dbank)
         # targets only accumulate: once traced, code can make a later walk
         # stop earlier, which must not drop what it found before
         for site, tg in P.dispatch.items():
@@ -547,7 +602,7 @@ _KEEPS_A = {"TAX", "TAY", "LDX", "LDY", "STX", "STY", "INX", "INY", "DEX", "DEY"
             "INC", "DEC", "TSX", "TXS"}
 
 
-def _find_dispatch(code, engines, decode, mem, dbank={}):
+def _find_dispatch(code, engines, tables, decode, mem, dbank={}):
     """site -> targets for RTS-trick dispatch and JMP (ptr) through tables.
 
     Scans the straight-line code before each RTS / JMP (ind) and tracks where
@@ -568,7 +623,18 @@ def _find_dispatch(code, engines, decode, mem, dbank={}):
     pred = {}
     for a, (n, m, mode, arg) in code.items():
         if m not in ENDS_FLOW and not (m == "JSR" and mem.at(a, arg) in engines):
-            pred[nxt(a, n)] = a
+            pred.setdefault(nxt(a, n), []).append(a)
+        if mode == "rel":
+            pred.setdefault(branch_target(a, arg), []).append(a)
+        if m == "JMP" and mode == "abs":
+            t = mem.at(a, arg)
+            if t is not None: pred.setdefault(t, []).append(a)
+        if m == "JSR" and mem.at(a, arg) in engines:
+            # The dispatcher jumps to the inline case table after the call.
+            # Treat those table entries as control-flow successors when
+            # walking backward from an RTS trick inside a case.
+            for t in tables.get(a, ()):
+                pred.setdefault(t, []).append(a)
 
     def plausible(t):
         if t is None or not inrom(t) or covered.get(t, t) != t: return False
@@ -681,48 +747,65 @@ def _find_dispatch(code, engines, decode, mem, dbank={}):
                 if t >> 16 == a0 >> 16 and q + j + k < (t & 0xFFFF) < end: end = t & 0xFFFF
         return out
 
+    def paths(site, limit=32, max_paths=64):
+        """Bounded predecessor paths, including branches and inline tables."""
+        todo, out = [(site, [], {site})], []
+        while todo and len(out) < max_paths:
+            cur, seq, seen = todo.pop()
+            prev = [p for p in pred.get(cur, ()) if p not in seen]
+            if len(seq) >= limit or not prev:
+                out.append(seq)
+                continue
+            for p in prev:
+                todo.append((p, seq + [p], seen | {p}))
+        return out
+
     found = {}
     for site, (n, m, mode, arg) in code.items():
         if not (m == "RTS" or (m == "JMP" and mode == "ind" and arg < 0x800)): continue
-        seq, a = [], site
-        while a in pred and len(seq) < 16:
-            a = pred[a]; seq.append(a)
-        A, stack, stores, yoff = None, [], {}, None
-        bound, doubled = None, False    # CMP #n / BCS: index range of the table
-        for i2, a in enumerate(reversed(seq)):
-            _, m2, mode2, arg2 = code[a]
-            if m2 == "ASL" and mode2 == "acc": doubled = True
-            elif m2 == "LSR" and mode2 == "acc": doubled = False
-            elif m2 == "CMP" and mode2 == "imm" and i2 + 1 < len(seq) \
-                    and code[list(reversed(seq))[i2 + 1]][1] == "BCS":
-                bound = arg2 >> doubled
-            if m2 == "LDA" and mode2 == "izy":
-                lo, hi = stores.get(arg2), stores.get((arg2 + 1) & 0xFF)
-                A = ("ptr", lo[1], hi[1], yoff) if lo and hi and lo[0] == hi[0] == "tbl" \
-                    and yoff is not None else None
-            elif m2 == "LDA":
-                tb = mem.at(a, arg2) if mode2 in ("abx", "aby") else None
-                A = ("tbl", tb) if tb is not None and inrom(tb) else \
-                    ("imm", arg2) if mode2 == "imm" else None
-            elif m2 in ("TAY", "LDY"): yoff = 0
-            elif m2 == "INY": yoff = None if yoff is None else yoff + 1
-            elif m2 == "DEY": yoff = None
-            if m2 == "STA" and mode2 in ("zp", "abs"): stores[arg2] = A
-            elif m2 in ("PHA", "PHP"): stack.append(A if m2 == "PHA" else None)
-            elif m2 in ("LDA", "TAY", "LDY", "INY", "DEY", "STA"): pass
-            elif m2 in ("PLA", "PLP"):
-                v = stack.pop() if stack else None
-                if m2 == "PLA": A = v
-            elif m2 == "JSR": A = None      # a called routine leaves the stack as it was
-            elif m2 not in _KEEPS_A and mode2 != "rel": A = None
-        if m == "RTS":
-            if len(stack) < 2: continue
-            tg = entries(stack[-1], stack[-2], 1, site)
-        else:
-            lo, hi = stores.get(arg), stores.get(arg + 1)
-            if lo and hi and lo[0] == hi[0] == "ptr": tg = entries2(lo, hi, site, bound)
-            else: tg = entries(lo, hi, 0, site)
-        if tg: found[site] = tg
+        targets = []
+        for seq in paths(site):
+            A, stack, stores, yoff = None, [], {}, None
+            bound, doubled = None, False    # CMP #n / BCS: index range of the table
+            ordered = list(reversed(seq))
+            for i2, a in enumerate(ordered):
+                _, m2, mode2, arg2 = code[a]
+                if m2 == "ASL" and mode2 == "acc": doubled = True
+                elif m2 == "LSR" and mode2 == "acc": doubled = False
+                elif m2 == "CMP" and mode2 == "imm" and i2 + 1 < len(ordered) \
+                        and code[ordered[i2 + 1]][1] == "BCS":
+                    bound = arg2 >> doubled
+                if m2 == "LDA" and mode2 == "izy":
+                    lo, hi = stores.get(arg2), stores.get((arg2 + 1) & 0xFF)
+                    A = ("ptr", lo[1], hi[1], yoff) if lo and hi and lo[0] == hi[0] == "tbl" \
+                        and yoff is not None else None
+                elif m2 == "LDA":
+                    tb = mem.at(a, arg2) if mode2 in ("abx", "aby") else None
+                    A = ("tbl", tb) if tb is not None and inrom(tb) else \
+                        ("imm", arg2) if mode2 == "imm" else None
+                    if mode2 == "abs":
+                        v = mem.at(a, arg2)
+                        if v is not None and inrom(v): A = ("imm", rd(v))
+                elif m2 in ("TAY", "LDY"): yoff = 0
+                elif m2 == "INY": yoff = None if yoff is None else yoff + 1
+                elif m2 == "DEY": yoff = None
+                if m2 == "STA" and mode2 in ("zp", "abs"): stores[arg2] = A
+                elif m2 in ("PHA", "PHP"): stack.append(A if m2 == "PHA" else None)
+                elif m2 in ("LDA", "TAY", "LDY", "INY", "DEY", "STA"): pass
+                elif m2 in ("PLA", "PLP"):
+                    v = stack.pop() if stack else None
+                    if m2 == "PLA": A = v
+                elif m2 == "JSR": A = None      # a called routine leaves the stack as it was
+                elif m2 not in _KEEPS_A and mode2 != "rel": A = None
+            if m == "RTS":
+                if len(stack) < 2: continue
+                tg = entries(stack[-1], stack[-2], 1, site)
+            else:
+                lo, hi = stores.get(arg), stores.get(arg + 1)
+                if lo and hi and lo[0] == hi[0] == "ptr": tg = entries2(lo, hi, site, bound)
+                else: tg = entries(lo, hi, 0, site)
+            targets.extend(t for t in tg if t not in targets)
+        if targets: found[site] = targets
     return found
 
 
@@ -1169,9 +1252,12 @@ def _stack_depth(P):
             if a in depth:
                 if switched:
                     P.stack_switch_code.add(a)
+                shared_dispatch_rts = a in P.dispatch and code[a][1] == "RTS" \
+                    and {depth[a], d} == {0, 2}
                 # 0 vs -2: a tail jump after PLA/PLA dropped the return frame
                 # runs in the caller's frame, translated the same way
-                if depth[a] != d and not (abs(depth[a] - d) == 2 and max(depth[a], d) <= 0) \
+                if depth[a] != d and not shared_dispatch_rts \
+                        and not (abs(depth[a] - d) == 2 and max(depth[a], d) <= 0) \
                         and not switched and a not in P.stack_switch_code:
                     # walk on at this depth too: the paths may meet again
                     # (see z); only where the depth changes the translation
@@ -1204,7 +1290,11 @@ def _stack_depth(P):
                     # TXS has selected a separate 6502 stack. Its current
                     # height is unrelated to the caller's tracked frame.
                     d = 0
-                    switched = tsx
+                    # LDX #$FF / TXS only empties the stack (the RESET
+                    # prologue): the same stack, not a task switch, so the
+                    # code after it keeps plain Z80 return frames
+                    if code.get(a - 2) != (2, "LDX", "imm", 0xFF):
+                        switched = tsx
             elif m in ("TAX", "INX", "DEX", "LDX", "PLX"):
                 sx = None
             if m == "RTS" and switched:
@@ -1284,3 +1374,166 @@ def _yielders(P):
         add = {t for t, js in calls.items() if t not in ys and js & ys}
         if not add: return ys
         ys |= add
+
+
+def ptr_tables(P, dbg=None):
+    """Code the tracer has no path to, found statically:
+    - targets of word tables the traced code reads as pointers (LDA tab,Y /
+      LDA tab+1,Y, or tab twice with INY between) but the dispatch analysis
+      didn't follow: tables copied into RAM and jumped through later (a
+      task scheduler's handlers), or read a routine away from the JMP (ptr).
+      JMP-style targets or RTS-trick ones (target - 1); a table of pointers
+      to such tables too (two levels);
+    - a pointer stored as two immediates into a zero-page pair that a
+      JMP (zp) reads (LDA #<t / STA zp / LDA #>t / STA zp+1);
+    - JSR / JMP from the fixed bank to the start of a switchable slot (a
+      vector at $8000 of each bank): the target in every bank where it
+      looks like code, when the bank analysis couldn't tell the bank or
+      the target it found is untraced.
+    -> set of banked addresses, to be traced like entries.txt lines.
+    dbg: a list that gets (site, table, rts, ok, entries, targets) per table."""
+    mem, code = P.mem, P.code
+    rd, rw, inrom = mem.rd, mem.rw, mem.inrom
+    covered = {}
+    for a, d in code.items():
+        for i in range(d[0]): covered.setdefault(canon(a + i), a)
+
+    def decode(a):
+        o = rd(a)
+        if o not in OPS: return None
+        m, mode = OPS[o]
+        n = MODES[mode]
+        if (a & 0xFFFF) + n - 1 > 0xFFFF or not inrom(canon(a + n - 1)): return None
+        arg = rd(canon(a + 1)) if n == 2 else rw(canon(a + 1)) if n == 3 else None
+        return n, m, mode, arg
+
+    def plausible(t):
+        """t decodes as code: 64 instructions along its branches without an
+        invalid opcode, a BRK, a jump out of ROM or running into the middle
+        of a traced instruction"""
+        if t is None or not inrom(t) or covered.get(t, t) != t: return False
+        seen, work = set(), [t]
+        while work and len(seen) < 64:
+            a = work.pop()
+            if a in seen or a in code: continue
+            if not inrom(a): return False
+            d = decode(a)
+            if d is None or d[1] == "BRK": return False
+            if any(canon(a + i) in covered for i in range(d[0])): return False
+            seen.add(a)
+            n, m, mode, arg = d
+            if m in ("JMP", "JSR") and mode == "abs":
+                v = mem.at(a, arg)
+                if v is not None and not inrom(v): return False
+                if m == "JMP" and v is not None: work.append(v)
+            if mode == "rel": work.append(branch_target(a, arg))
+            if m not in ENDS_FLOW: work.append(nxt(a, n))
+        return True
+
+    nsw = mem.nbanks - 0x4000 // mem.unit          # switchable banks
+
+    def views(site, t):
+        """how code at site may see 16-bit address t: [banked addresses],
+        from the bank analysis where it knows the banks mapped at site"""
+        v = mem.at(site, t)
+        if v is not None: return [v]
+        bk = P.dbank.get(site)
+        if bk is None: return [mem.banked(t, b) for b in range(nsw)]
+        return sorted({mem.banked(t, tp[mem.slot(t)]) for tp in bk if tp[mem.slot(t)] is not None})
+
+    refs = {}       # table address -> sites that index it
+    for a, (n, m, mode, arg) in code.items():
+        if m in ("LDA", "LDX", "LDY") and mode in ("abx", "aby") and arg >= 0x8000:
+            refs.setdefault(arg, set()).add(a)
+
+    def word(tv, site, i):
+        """the i-th word of the table at tv as code at site sees it"""
+        t = canon(tv + 2 * i)
+        if not inrom(t) or not inrom(canon(t + 1)): return None
+        w = mem.at(site, rw(t))
+        if w is None and tv >> 16:
+            # a switchable-slot target read from the fixed bank: in the
+            # table's own bank
+            w = mem.banked(rw(t), mem.bank(tv))
+        return w
+
+    def words(tv, site):
+        """the table at tv: its words as code at site sees them, up to
+        traced code, the first of its own targets or 128 entries"""
+        out, end = [], None       # end: the nearest word pointing past tv
+        for i in range(128):
+            t = canon(tv + 2 * i)
+            if i and (t in code or t == end): break
+            w = word(tv, site, i)
+            if w is None: break
+            out.append(w)
+            if tv < w < (end or 1 << 32): end = w
+        return out
+
+    def walk(ws, plus):
+        """-> (targets, entries, code entries): the words ws, plus added,
+        while they look like code; the table ends at two entries in a row
+        that don't. A lone entry that doesn't look like code is skipped."""
+        tg, ent, ok, bad = [], 0, 0, 0
+        for i, w in enumerate(ws):
+            w = canon(w + plus)
+            if w in code or plausible(w):
+                ent, ok, bad = i + 1, ok + 1, 0
+                if w not in tg: tg.append(w)
+            elif bad: break
+            else: bad = 1
+        return tg, ent, ok
+
+    def table(tv, site, depth=0):
+        """targets of the code pointer table at tv, or of the tables of
+        code pointers its words point to (two levels), or []"""
+        ws = words(tv, site)
+        # JMP-style or RTS-trick: whichever gives more code
+        d, de, dk = walk(ws, 0)
+        r, re_, rk = walk(ws, 1)
+        tg, ent, ok, rts = (d, de, dk, False) if dk >= rk else (r, re_, rk, True)
+        if len(tg) >= 2 and ok * 4 >= ent * 3 and (ok == ent or not depth):
+            if dbg is not None: dbg.append((site, tv, rts, ok, ent, tg))
+            return tg
+        if depth: return []
+        # a table of pointers to such tables (all of whose words are code):
+        # most of its words, up to the first outside ROM, must be one
+        ws = ws[:[inrom(w) for w in ws + [0]].index(False)]
+        sub = [table(w, site, 1) for w in ws]
+        if sum(1 for t in sub if t) * 2 < len(ws): return []
+        return [t for tg in sub for t in tg]
+
+    out = set()
+    done = set()
+    for tab in sorted(refs):
+        sites = refs[tab]
+        # read as a word: tab and tab + 1, or tab twice close by (INY between)
+        if tab + 1 not in refs and not (len(sites) > 1 and max(sites) - min(sites) <= 16): continue
+        if tab - 1 in done: continue        # the high bytes of that table
+        site = min(sites)
+        for tv in views(site, tab):
+            if inrom(tv):
+                tg = table(tv, site)
+                if tg: out.update(tg); done.add(tab)
+    # LDA #lo / STA zp / LDA #hi / STA zp+1 (either order) for a JMP (zp)
+    ind = {arg for n, m, mode, arg in code.values() if m == "JMP" and mode == "ind" and arg < 0x100}
+    for a, (n, m, mode, arg) in code.items():
+        if m != "LDA" or mode != "imm": continue
+        s1 = code.get(nxt(a, n))
+        if not s1 or s1[1] != "STA" or s1[2] != "zp": continue
+        b = nxt(nxt(a, n), s1[0])
+        l2, s2 = code.get(b), code.get(nxt(b, 2))
+        if not l2 or l2[1:3] != ("LDA", "imm") or not s2 or s2[1] != "STA" or s2[2] != "zp": continue
+        z1, z2 = s1[3], s2[3]
+        if z2 == z1 + 1 and z1 in ind: t = l2[3] << 8 | arg
+        elif z1 == z2 + 1 and z2 in ind: t = arg << 8 | l2[3]
+        else: continue
+        t = mem.at(a, t)
+        if t is not None and (t in code or plausible(t)): out.add(t)
+    # calls into a switchable slot from code that doesn't know the bank
+    traced = {a & 0xFFFF for a in code if a >> 16}
+    for a, (n, m, mode, arg) in code.items():
+        if m in ("JSR", "JMP") and mode == "abs" and mem.at(a, arg) is None \
+                and arg & 0x1FFF < 0x40 and (P.xbank.get(a) is None or arg not in traced):
+            out.update(w for w in (mem.banked(arg, b) for b in range(nsw)) if plausible(w))
+    return out
