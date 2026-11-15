@@ -48,17 +48,21 @@ proc nes2msx_save {why} {
     }
 }
 
-# An unknown computed-jump target: entries.txt makes the next build trace it.
+# An unknown computed-jump target: signature-specific entries make the next build trace it.
 proc nes2msx_entry {addr bank} {
     global env
     set line [format "%s %04x" [expr {$addr >= 0x8000 && $addr < 0xC000 ? [format %x $bank] : "-"}] $addr]
-    set file "$env(NES2MSX_OUT)/entries.txt"
+    if {[info exists env(NES2MSX_ENTRIES)]} {
+        set file $env(NES2MSX_ENTRIES)
+    } else {
+        set file "$env(NES2MSX_OUT)/entries.txt"
+    }
     if {[file exists $file]} {
         set f [open $file r]; set old [split [read $f] "\n"]; close $f
         if {[lsearch -exact $old $line] >= 0} return
     }
     set f [open $file a]; puts $f $line; close $f
-    message "nes2msxtr: added $line to entries.txt - rebuild to trace it"
+    message "nes2msxtr: added $line to [file tail $file] - rebuild to trace it"
 }
 
 set ::nes2msx_crashed 0

@@ -1,0 +1,112 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="using:Nes2MsxTr.App"
+        x:Class="Nes2MsxTr.App.MainWindow"
+        x:CompileBindings="False"
+        Title="NES to MSX turboR converter" Width="1280" Height="800" MinWidth="900" MinHeight="560">
+  <Grid ColumnDefinitions="*,6,*" Margin="12">
+    <!-- left: setup, games, run -->
+    <Grid Grid.Column="0" RowDefinitions="Auto,Auto,*,Auto" RowSpacing="10">
+      <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="6" RowSpacing="6">
+        <TextBlock Text="Project" VerticalAlignment="Center" Width="60"/>
+        <TextBox Grid.Column="1" Name="RootBox"/>
+        <Button Grid.Column="2" Name="RootBtn" Content="Browse…"/>
+        <TextBlock Grid.Row="1" Text="ROMs" VerticalAlignment="Center"/>
+        <TextBox Grid.Row="1" Grid.Column="1" Name="RomsBox"/>
+        <Button Grid.Row="1" Grid.Column="2" Name="RomsBtn" Content="Browse…"/>
+      </Grid>
+
+      <Border Grid.Row="1" BorderThickness="1" BorderBrush="Gray" CornerRadius="4" Padding="8">
+        <StackPanel Spacing="6">
+          <DockPanel>
+            <TextBlock Text="Dependencies" FontWeight="Bold" VerticalAlignment="Center"/>
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right">
+              <Button Name="CheckBtn" Content="Recheck"/>
+              <Button Name="InstallBtn" Content="Install missing"/>
+            </StackPanel>
+          </DockPanel>
+          <ItemsControl Name="DepList">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <Grid ColumnDefinitions="24,Auto,*" ColumnSpacing="6">
+                  <TextBlock Text="{Binding Mark}" FontWeight="Bold"/>
+                  <TextBlock Grid.Column="1" Text="{Binding Name}"/>
+                  <TextBlock Grid.Column="2" Text="{Binding Detail}" Opacity="0.65" TextTrimming="CharacterEllipsis"/>
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </Border>
+
+      <DockPanel Grid.Row="2">
+        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
+          <TextBlock Text="Games" FontWeight="Bold" VerticalAlignment="Center"/>
+          <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right">
+            <Button Name="AllBtn" Content="All"/>
+            <Button Name="NoneBtn" Content="None"/>
+            <Button Name="RefreshBtn" Content="Refresh"/>
+          </StackPanel>
+        </DockPanel>
+        <ListBox Name="RomList" SelectionMode="Single">
+          <ListBox.ItemTemplate>
+            <DataTemplate>
+              <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                <CheckBox IsChecked="{Binding Selected}" IsEnabled="{Binding Supported}"/>
+                <StackPanel Grid.Column="1">
+                  <TextBlock Text="{Binding Name}"/>
+                  <TextBlock FontSize="11" Opacity="0.65" FontFamily="Menlo,Consolas,monospace">
+                    <Run Text="{Binding Sha1}"/><Run Text="  "/><Run Text="{Binding Info}"/>
+                  </TextBlock>
+                </StackPanel>
+                <StackPanel Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center">
+                  <TextBlock Text="{Binding Status}" HorizontalAlignment="Right"/>
+                  <TextBlock Text="{Binding PublishedMark}" FontSize="11" Opacity="0.65" HorizontalAlignment="Right"/>
+                </StackPanel>
+              </Grid>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </DockPanel>
+
+      <StackPanel Grid.Row="3" Spacing="8">
+        <WrapPanel>
+          <TextBlock Text="Discover:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+          <CheckBox Name="DiscoverChk" Content="run" IsChecked="True"/>
+          <TextBlock Text="seconds" VerticalAlignment="Center" Margin="6,0"/>
+          <NumericUpDown Name="SecsNum" Value="100" Minimum="10" Maximum="600" Width="110"/>
+          <TextBlock Text="rounds" VerticalAlignment="Center" Margin="12,0,6,0"/>
+          <NumericUpDown Name="RoundsNum" Value="14" Minimum="1" Maximum="60" Width="100"/>
+          <TextBlock Text="play" VerticalAlignment="Center" Margin="12,0,6,0"/>
+          <ComboBox Name="PlayBox" SelectedIndex="1" Width="190">
+            <ComboBoxItem>1 - Start, run, jump, fire</ComboBoxItem>
+            <ComboBoxItem>2 - menus first (Start every 4 s)</ComboBoxItem>
+          </ComboBox>
+        </WrapPanel>
+        <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+          <ProgressBar Name="Progress" VerticalAlignment="Center" Minimum="0" Maximum="1"/>
+          <Button Grid.Column="1" Name="CancelBtn" Content="Cancel" IsEnabled="False"/>
+          <Button Grid.Column="2" Name="RunBtn" Content="Discover + convert + publish" Classes="accent"/>
+        </Grid>
+      </StackPanel>
+    </Grid>
+
+    <GridSplitter Grid.Column="1" ResizeDirection="Columns" Background="Transparent"/>
+
+    <!-- right: log -->
+    <DockPanel Grid.Column="2">
+      <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
+        <TextBlock Text="Log" FontWeight="Bold" VerticalAlignment="Center"/>
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right">
+          <CheckBox Name="FollowChk" Content="follow" IsChecked="True"/>
+          <Button Name="ClearBtn" Content="Clear"/>
+        </StackPanel>
+      </DockPanel>
+      <Border BorderThickness="1" BorderBrush="Gray" CornerRadius="4">
+        <ScrollViewer Name="LogScroll" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+          <SelectableTextBlock Name="LogText" FontFamily="Menlo,Consolas,DejaVu Sans Mono,monospace" FontSize="12" Padding="8"/>
+        </ScrollViewer>
+      </Border>
+    </DockPanel>
+  </Grid>
+</Window>

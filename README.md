@@ -161,9 +161,16 @@ nes2msxtr/
 
 `ROM` can be a name in `sourcerom/` (with or without `.nes`) or any path.
 Some jump targets can only be found while the game runs. When the game stops
-on one (red backdrop), `make run` adds it to `build/<game>/entries.txt`;
+on one (red backdrop), `make run` adds it to `build/<game>/entries.<ROM-SHA1>.txt`;
 rebuild and play on. `make discover` finds them headless by playing the game
 automatically (see the samples below).
+
+A jump to an address the tracer never saw does not stop the game: the cartridge
+carries a small 6502 interpreter (`runtime/interp.asm`, one extra code bank)
+that runs the original bytes there until the flow reaches translated code
+again. It is slow, so such a path still wants an entry; `make discover` builds
+with `--no-interp` so these jumps stay visible as stops. `--no-interp` drops
+the bank from a build (32K less mapper RAM).
 
 ## Sample games
 
@@ -173,8 +180,11 @@ Put your own dumps in `sourcerom/` under these names, then build all of them:
 make samples
 ```
 
-The jump targets found so far by playing (`samples/<game>.entries.txt`) are
-copied into `build/<game>/` the first time a sample is built.
+The jump targets found so far by playing are copied into the
+ROM-signature-specific entries file in `build/<game>/` the first time a sample
+is built. Sample entry files use `samples/entries.<ROM-SHA1>.txt`; see
+[`samples/README.md`](samples/README.md) for the mapping to ROM filenames. Make
+keeps the output folder named after the ROM file.
 
 ### Banana Dash demo
 
@@ -202,7 +212,8 @@ make run ROM=nova
 make discover ROM=nova
 ```
 
-The jump targets found so far are in `samples/nova.entries.txt`.
+The jump targets found so far are in
+`samples/entries.b6b07ee76492ed475f39167c89b342353f999231.txt`.
 
 ### Bubble Bobble
 

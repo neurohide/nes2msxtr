@@ -14,6 +14,9 @@ LBL="$OUT/game.lbl"
 [ -n "$REPLAY" ] && [ -f "${REPLAY%.omr}.lbl" ] && LBL="${REPLAY%.omr}.lbl"
 lbl() { grep "^$1:" "$LBL" | sed 's/.*\$/0x/'; }
 export NES2MSX_OUT="$(cd "$OUT" && pwd)" NES2MSX_ROM="$(cd "$(dirname "$ROM")" && pwd)/$(basename "$ROM")"
+if [ -f "$OUT/rom.sha1" ]; then
+    export NES2MSX_ENTRIES="$NES2MSX_OUT/entries.$(cat "$OUT/rom.sha1").txt"
+fi
 export NES2MSX_CRASH="$(lbl crash)" NES2MSX_BADADDR="$(lbl bad_addr)" NES2MSX_CURBANK="$(lbl cur_bank)"
 export NES2MSX_BADBANK="$(lbl bad_bank)"
 if [ -z "$REPLAY" ]; then

@@ -608,10 +608,134 @@ xret:   ex af, af'
 ; PLA/PLA that drops the current return frame. If it was a cross-bank
 ; frame and the frame below returns into the caller's bank, that frame now
 ; needs the bank restored: the bank stack entry is kept and xret pushed.
+; A dispatcher case's caller pushed its return address (PHA/PHA, then JSR
+; dispatcher): eng_mark notes the stack pointer at those calls, newest first
+; (cases nest). eng_find: Z (and the mark cleared) when s6_ptr is one of them.
+; Preserves BC, DE; AF is the caller's scratch.
+eng_mark:
+        push af
+        push bc
+        push de
+        push ix
+        ld hl, 10               ; BC = the caller's SP once this returns
+        add hl, sp
+        ld b, h
+        ld c, l
+        ld hl, 8
+        add hl, sp
+        ld e, (hl)
+        inc hl
+        ld d, (hl)              ; DE = the call site
+        ld ix, eng_s6
+        ld a, 8
+em_l:   push af
+        ld a, (ix+2)
+        cp e
+        jr nz, em_n
+        ld a, (ix+3)
+        cp d
+        jr nz, em_n
+        ld hl, (s6_ptr)         ; this site again: the case returned by a plain
+                                ; RET and left the two bytes its caller pushed
+                                ; (the main loop, once per pass)
+        inc l
+        inc l
+        ld a, l
+        cp (ix+0)
+        jr nz, em_n             ; not the pair right below the new one
+        ld hl, (s6_ptr)         ; slide the new pair over the leaked one
+        inc l
+        ld e, (hl)
+        inc l
+        ld d, (hl)
+        inc l
+        ld (hl), e
+        inc l
+        ld (hl), d
+        dec l
+        dec l
+        ld (s6_ptr), hl
+        pop af
+        jr em_out
+em_n:   inc ix
+        inc ix
+        inc ix
+        inc ix
+        inc ix
+        inc ix
+        pop af
+        dec a
+        jr nz, em_l
+        push bc
+        push de
+        ld hl, eng_s6 + 41
+        ld de, eng_s6 + 47
+        ld bc, 42
+        lddr
+        pop de
+        pop bc
+        ld hl, (s6_ptr)
+        ld (eng_s6), hl
+        ld (eng_s6 + 2), de
+        ld (eng_s6 + 4), bc
+em_out: pop ix
+        pop de
+        pop bc
+        pop af
+        ret
+eng_find:
+        push bc
+        push de
+        ld de, (s6_ptr)
+        ld hl, eng_s6
+        ld b, 8
+ef_l:   ld c, (hl)
+        inc hl
+        ld a, (hl)              ; mark below s6_ptr: its frame is gone, drop it
+        cp d
+        jr c, ef_old
+        jr nz, ef_nx
+        ld a, c
+        cp e
+        jr z, ef_hit
+        jr nc, ef_nx
+ef_old: xor a
+        ld (hl), a
+        dec hl
+        ld (hl), a
+        inc hl
+ef_nx:  inc hl
+        inc hl
+        inc hl
+        inc hl
+        inc hl
+        djnz ef_l
+        ld a, 1
+        or a
+        pop de
+        pop bc
+        ret
+ef_hit: xor a
+        ld (hl), a
+        dec hl
+        ld (hl), a
+        pop de
+        pop bc
+        ret
+
 drop_frame:
         di
         ex af, af'
-        pop hl                  ; our own return address
+        call eng_find
+        jr nz, df_z80
+df_ps:  ld hl, (s6_ptr)         ; the caller pushed the case's return address:
+        inc l                   ; pop those bytes, not a Z80 frame
+        inc l
+        ld (s6_ptr), hl
+        ex af, af'
+        ei
+        ret
+df_z80: pop hl                  ; our own return address
         ld (fc_tgt), hl
         pop hl                  ; the frame
         ld a, h
@@ -667,7 +791,7 @@ spin_wait:
         ld (poll_seen), a       ; leaves the wait
         ld a, (unw_a)
         ld d, a
-        ret
+        jp rts_eng              ; the RTS of the routine, or of a dispatcher case
 
 ; Idle points of the main loop: small loops that wait for the NMI (polling
 ; a RAM byte), as the translator marks them; idle_end is where they exit.
@@ -873,7 +997,15 @@ dj_miss:
         ld (bad_bank), a
         ld hl, (dj_key)
         ld (bad_addr), hl
+if INTERP
+        pop de                  ; no translated code there: the interpreter
+        pop bc                  ; runs it (interp_entry reads bad_addr)
+        ld a, INTERP_BANK
+        ld hl, interp_entry
+        ret
+else
         jp crash
+endif
 
 ; RTS with two bytes pushed by the routine itself (PHA/PHA/RTS dispatch):
 ; pull the address and jump to it + 1.
@@ -891,6 +1023,19 @@ rts_jump:
         pop de
         ex af, af'
         jp dyn_jump
+
+; RTS of a dispatcher case that expects its return address pushed by the caller
+; (PHA/PHA, JSR dispatcher; eng_s6 marks that). A case reached by a plain
+; JSR has no such pair: return through the Z80 frame.
+rts_eng:
+        ex af, af'
+        call eng_find
+        jr nz, re_plain
+        ex af, af'
+        jp rts_sw
+re_plain:
+        ex af, af'
+        ret
 
 ; RTS on a 6502 stack that TXS switched (P.stack_switch_rts): it returns to
 ; the address on that stack. When the top Z80 frame is the one a translated
