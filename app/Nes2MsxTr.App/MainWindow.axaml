@@ -3,23 +3,57 @@
         xmlns:local="using:Nes2MsxTr.App"
         x:Class="Nes2MsxTr.App.MainWindow"
         x:CompileBindings="False"
-        Title="NES to MSX turboR converter" Width="1280" Height="800" MinWidth="900" MinHeight="560">
-  <Grid ColumnDefinitions="*,6,*" Margin="12">
+        Title="NES > MSX TURBOR (VDP9990)" Width="1280" Height="800" MinWidth="900" MinHeight="560">
+  <Grid RowDefinitions="Auto,*,Auto">
+  <!-- Donkey Kong girder header -->
+  <Border Grid.Row="0" Height="48" RenderOptions.EdgeMode="Aliased">
+    <Border.Background>
+      <DrawingBrush TileMode="Tile" DestinationRect="0,0,48,48" Stretch="None">
+        <DrawingBrush.Drawing>
+          <DrawingGroup>
+            <GeometryDrawing Brush="#D83800" Geometry="M0,0 L48,0 L48,48 L0,48 Z"/>
+            <GeometryDrawing Brush="#7C0800" Geometry="M0,0 L48,0 L48,6 L0,6 Z M0,42 L48,42 L48,48 L0,48 Z"/>
+            <GeometryDrawing Brush="#FC9838" Geometry="M0,6 L48,6 L48,8 L0,8 Z"/>
+            <GeometryDrawing Geometry="M0,6 L24,42 L48,6 M0,42 L24,6 L48,42">
+              <GeometryDrawing.Pen><Pen Brush="#7C0800" Thickness="4"/></GeometryDrawing.Pen>
+            </GeometryDrawing>
+            <GeometryDrawing Brush="#FCE0A8" Geometry="M2,2 L6,2 L6,4 L2,4 Z M42,2 L46,2 L46,4 L42,4 Z M2,44 L6,44 L6,46 L2,46 Z M42,44 L46,44 L46,46 L42,46 Z"/>
+          </DrawingGroup>
+        </DrawingBrush.Drawing>
+      </DrawingBrush>
+    </Border.Background>
+    <Border Background="#000000" BorderBrush="#FCFCFC" BorderThickness="3" HorizontalAlignment="Left"
+            VerticalAlignment="Center" Margin="16,0" Padding="12,6">
+      <TextBlock Text="NES &gt; MSX TURBOR (VDP9990)" FontSize="14" Foreground="#FCD8A8"/>
+    </Border>
+  </Border>
+
+  <Grid Name="BodyGrid" Grid.Row="1" Margin="12">
+    <Grid.ColumnDefinitions>
+      <ColumnDefinition Width="*"/>
+      <ColumnDefinition Width="6"/>
+      <ColumnDefinition Width="0"/>
+      <ColumnDefinition Width="Auto"/>
+    </Grid.ColumnDefinitions>
     <!-- left: setup, games, run -->
-    <Grid Grid.Column="0" RowDefinitions="Auto,Auto,*,Auto" RowSpacing="10">
-      <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="6" RowSpacing="6">
-        <TextBlock Text="Project" VerticalAlignment="Center" Width="60"/>
+    <Grid Name="LeftGrid" Grid.Column="0" RowDefinitions="Auto,*,Auto" RowSpacing="10">
+      <local:SlidePanel Name="SettingsPanel" Grid.Row="0" Title="SETTINGS">
+        <StackPanel Spacing="10">
+      <Grid ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="6" RowSpacing="6">
+        <TextBlock Text="Project" VerticalAlignment="Center" Width="90"/>
         <TextBox Grid.Column="1" Name="RootBox"/>
         <Button Grid.Column="2" Name="RootBtn" Content="Browse…"/>
         <TextBlock Grid.Row="1" Text="ROMs" VerticalAlignment="Center"/>
         <TextBox Grid.Row="1" Grid.Column="1" Name="RomsBox"/>
         <Button Grid.Row="1" Grid.Column="2" Name="RomsBtn" Content="Browse…"/>
+        <TextBlock Grid.Row="2" Text="Output" VerticalAlignment="Center"/>
+        <TextBox Grid.Row="2" Grid.Column="1" Name="DestBox"/>
+        <Button Grid.Row="2" Grid.Column="2" Name="DestBtn" Content="Browse…"/>
       </Grid>
 
-      <Border Grid.Row="1" BorderThickness="1" BorderBrush="Gray" CornerRadius="4" Padding="8">
         <StackPanel Spacing="6">
           <DockPanel>
-            <TextBlock Text="Dependencies" FontWeight="Bold" VerticalAlignment="Center"/>
+            <TextBlock Text="Dependencies" Foreground="#FCD8A8" VerticalAlignment="Center"/>
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right">
               <Button Name="CheckBtn" Content="Recheck"/>
               <Button Name="InstallBtn" Content="Install missing"/>
@@ -28,8 +62,8 @@
           <ItemsControl Name="DepList">
             <ItemsControl.ItemTemplate>
               <DataTemplate>
-                <Grid ColumnDefinitions="24,Auto,*" ColumnSpacing="6">
-                  <TextBlock Text="{Binding Mark}" FontWeight="Bold"/>
+                <Grid ColumnDefinitions="32,Auto,*" ColumnSpacing="6">
+                  <TextBlock Text="{Binding Mark}" Foreground="{Binding MarkBrush}"/>
                   <TextBlock Grid.Column="1" Text="{Binding Name}"/>
                   <TextBlock Grid.Column="2" Text="{Binding Detail}" Opacity="0.65" TextTrimming="CharacterEllipsis"/>
                 </Grid>
@@ -37,11 +71,13 @@
             </ItemsControl.ItemTemplate>
           </ItemsControl>
         </StackPanel>
-      </Border>
+        </StackPanel>
+      </local:SlidePanel>
 
-      <DockPanel Grid.Row="2">
+      <local:SlidePanel Name="GamesPanel" Grid.Row="1" Title="ROMS">
+      <DockPanel>
         <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
-          <TextBlock Text="Games" FontWeight="Bold" VerticalAlignment="Center"/>
+          <TextBlock Text="ROMs" Foreground="#FCD8A8" VerticalAlignment="Center"/>
           <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right">
             <Button Name="AllBtn" Content="All"/>
             <Button Name="NoneBtn" Content="None"/>
@@ -53,14 +89,15 @@
             <DataTemplate>
               <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
                 <CheckBox IsChecked="{Binding Selected}" IsEnabled="{Binding Supported}"/>
-                <StackPanel Grid.Column="1">
+                <StackPanel Grid.Column="1" ClipToBounds="True">
                   <TextBlock Text="{Binding Name}"/>
-                  <TextBlock FontSize="11" Opacity="0.65" FontFamily="Menlo,Consolas,monospace">
+                  <TextBlock FontSize="11" Foreground="#9C9CD0" FontFamily="Menlo,Consolas,monospace">
                     <Run Text="{Binding Sha1}"/><Run Text="  "/><Run Text="{Binding Info}"/>
                   </TextBlock>
                 </StackPanel>
                 <StackPanel Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center">
                   <TextBlock Text="{Binding Status}" HorizontalAlignment="Right"/>
+                  <TextBlock Text="{Binding FixMark}" FontSize="8" Foreground="#FF3030" HorizontalAlignment="Right"/>
                   <TextBlock Text="{Binding PublishedMark}" FontSize="11" Opacity="0.65" HorizontalAlignment="Right"/>
                 </StackPanel>
               </Grid>
@@ -68,15 +105,17 @@
           </ListBox.ItemTemplate>
         </ListBox>
       </DockPanel>
+      </local:SlidePanel>
 
-      <StackPanel Grid.Row="3" Spacing="8">
+      <StackPanel Grid.Row="2" Spacing="8">
         <WrapPanel>
           <TextBlock Text="Discover:" VerticalAlignment="Center" Margin="0,0,6,0"/>
           <CheckBox Name="DiscoverChk" Content="run" IsChecked="True"/>
+          <CheckBox Name="CleanChk" Content="clean traces after build" IsChecked="True" Margin="12,0,0,0"/>
           <TextBlock Text="seconds" VerticalAlignment="Center" Margin="6,0"/>
-          <NumericUpDown Name="SecsNum" Value="100" Minimum="10" Maximum="600" Width="110"/>
+          <NumericUpDown Name="SecsNum" Value="100" Minimum="10" Maximum="600" Width="170" FontSize="9"/>
           <TextBlock Text="rounds" VerticalAlignment="Center" Margin="12,0,6,0"/>
-          <NumericUpDown Name="RoundsNum" Value="14" Minimum="1" Maximum="60" Width="100"/>
+          <NumericUpDown Name="RoundsNum" Value="14" Minimum="1" Maximum="60" Width="150" FontSize="9"/>
           <TextBlock Text="play" VerticalAlignment="Center" Margin="12,0,6,0"/>
           <ComboBox Name="PlayBox" SelectedIndex="1" Width="190">
             <ComboBoxItem>1 - Start, run, jump, fire</ComboBoxItem>
@@ -86,27 +125,65 @@
         <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
           <ProgressBar Name="Progress" VerticalAlignment="Center" Minimum="0" Maximum="1"/>
           <Button Grid.Column="1" Name="CancelBtn" Content="Cancel" IsEnabled="False"/>
-          <Button Grid.Column="2" Name="RunBtn" Content="Discover + convert + publish" Classes="accent"/>
+          <Button Grid.Column="2" Name="RunBtn" Content="Convert" Classes="accent"/>
         </Grid>
       </StackPanel>
     </Grid>
 
-    <GridSplitter Grid.Column="1" ResizeDirection="Columns" Background="Transparent"/>
+    <GridSplitter Name="LogSplit" Grid.Column="1" ResizeDirection="Columns" Background="Transparent" IsVisible="False"/>
 
     <!-- right: log -->
-    <DockPanel Grid.Column="2">
+    <Border Name="LogPanel" Grid.Column="2" Classes="panel" Padding="10" IsVisible="False">
+    <DockPanel>
       <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
-        <TextBlock Text="Log" FontWeight="Bold" VerticalAlignment="Center"/>
+        <TextBlock Text="LOG" FontSize="12" Foreground="#FCD8A8" VerticalAlignment="Center"/>
         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right">
           <CheckBox Name="FollowChk" Content="follow" IsChecked="True"/>
           <Button Name="ClearBtn" Content="Clear"/>
         </StackPanel>
       </DockPanel>
-      <Border BorderThickness="1" BorderBrush="Gray" CornerRadius="4">
+      <Border Background="#000000">
         <ScrollViewer Name="LogScroll" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
-          <SelectableTextBlock Name="LogText" FontFamily="Menlo,Consolas,DejaVu Sans Mono,monospace" FontSize="12" Padding="8"/>
+          <SelectableTextBlock Name="LogText" FontFamily="Menlo,Consolas,DejaVu Sans Mono,monospace" FontSize="12" Foreground="#A8F0A0" Padding="8"/>
         </ScrollViewer>
       </Border>
     </DockPanel>
+    </Border>
+
+    <!-- open / close handle on the right border, halfway down -->
+    <Button Name="LogToggle" Grid.Column="3" VerticalAlignment="Center" Width="26" Height="72"
+            Padding="0" Margin="6,0,0,0" ToolTip.Tip="Show / hide the log">
+      <Grid Width="16" Height="16">
+        <!-- expand: « (the panel opens to the left) -->
+        <Path Name="ExpandIcon" Stroke="#FCFCFC" StrokeThickness="3" StrokeLineCap="Square"
+              Data="M8,2 L2,8 L8,14 M15,2 L9,8 L15,14"/>
+        <!-- collapse: » -->
+        <Path Name="CollapseIcon" Stroke="#FCFCFC" StrokeThickness="3" StrokeLineCap="Square" IsVisible="False"
+              Data="M1,2 L7,8 L1,14 M8,2 L14,8 L8,14"/>
+      </Grid>
+    </Button>
+  </Grid>
+
+  <!-- Mario warp pipes on brick ground -->
+  <Grid Grid.Row="2" Height="72">
+    <Border VerticalAlignment="Bottom" Height="24" RenderOptions.EdgeMode="Aliased">
+      <Border.Background>
+        <DrawingBrush TileMode="Tile" DestinationRect="0,0,24,24" Stretch="None">
+          <DrawingBrush.Drawing>
+            <DrawingGroup>
+              <GeometryDrawing Brush="#C84C0C" Geometry="M0,0 L24,0 L24,24 L0,24 Z"/>
+              <GeometryDrawing Brush="#FC9838" Geometry="M0,0 L24,0 L24,2 L0,2 Z M0,12 L24,12 L24,14 L0,14 Z"/>
+              <GeometryDrawing Geometry="M0,12 L24,12 M12,0 L12,12 M0,0 L0,12 M6,12 L6,24 M18,12 L18,24">
+                <GeometryDrawing.Pen><Pen Brush="#000000" Thickness="2"/></GeometryDrawing.Pen>
+              </GeometryDrawing>
+            </DrawingGroup>
+          </DrawingBrush.Drawing>
+        </DrawingBrush>
+      </Border.Background>
+    </Border>
+    <local:Pipe HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="32,0,0,24" Height="48"/>
+    <local:Pipe HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="120,0,0,24" Height="32"/>
+    <local:Pipe HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,40,24" Height="40"/>
+  </Grid>
   </Grid>
 </Window>

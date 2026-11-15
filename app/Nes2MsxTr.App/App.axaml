@@ -1,8 +1,93 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="using:Nes2MsxTr.App"
              x:Class="Nes2MsxTr.App.App"
-             RequestedThemeVariant="Default">
+             RequestedThemeVariant="Dark">
+  <Application.Resources>
+    <FontFamily x:Key="Pixel">avares://nes2msxtr-app/Assets#Press Start 2P</FontFamily>
+    <SolidColorBrush x:Key="NesRed">#B53120</SolidColorBrush>
+    <SolidColorBrush x:Key="NesRedHi">#E45C10</SolidColorBrush>
+    <SolidColorBrush x:Key="NesNight">#0C0C28</SolidColorBrush>
+    <SolidColorBrush x:Key="NesPanel">#101040</SolidColorBrush>
+  </Application.Resources>
   <Application.Styles>
     <FluentTheme />
+    <Style Selector="Window">
+      <Setter Property="Background" Value="{StaticResource NesNight}"/>
+      <Setter Property="FontFamily" Value="{StaticResource Pixel}"/>
+      <Setter Property="FontSize" Value="10"/>
+    </Style>
+    <Style Selector="TextBlock"><Setter Property="Foreground" Value="#FCFCFC"/></Style>
+    <Style Selector="CheckBox"><Setter Property="Foreground" Value="#FCFCFC"/></Style>
+    <Style Selector="TextBox">
+      <Setter Property="CornerRadius" Value="0"/>
+      <Setter Property="BorderThickness" Value="3"/>
+      <Setter Property="BorderBrush" Value="#FCFCFC"/>
+      <Setter Property="Background" Value="#000000"/>
+      <Setter Property="Foreground" Value="#A8F0A0"/>
+    </Style>
+    <Style Selector="Button">
+      <Setter Property="FontFamily" Value="{StaticResource Pixel}"/>
+      <Setter Property="Foreground" Value="#FCFCFC"/>
+      <Setter Property="Padding" Value="10,8"/>
+    </Style>
+    <Style Selector="Button /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="CornerRadius" Value="0"/>
+      <Setter Property="BorderThickness" Value="3"/>
+      <Setter Property="BorderBrush" Value="#000000"/>
+      <Setter Property="Background" Value="#5C5C9C"/>
+      <Setter Property="Foreground" Value="#FCFCFC"/>
+    </Style>
+    <Style Selector="Button:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="#7C7CD0"/>
+      <Setter Property="BorderBrush" Value="#FCFCFC"/>
+      <Setter Property="Foreground" Value="#FCFCFC"/>
+    </Style>
+    <Style Selector="Button:disabled /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="#303050"/>
+      <Setter Property="Foreground" Value="#707090"/>
+    </Style>
+    <Style Selector="Button.accent /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{StaticResource NesRed}"/>
+      <Setter Property="BorderBrush" Value="#FCFCFC"/>
+    </Style>
+    <Style Selector="Button.accent:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{StaticResource NesRedHi}"/>
+    </Style>
+    <Style Selector="Button.accent:disabled /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="#503030"/>
+      <Setter Property="BorderBrush" Value="#707090"/>
+    </Style>
+    <Style Selector="local|SlidePanel">
+      <Setter Property="Template">
+        <ControlTemplate>
+          <Border Classes="panel">
+            <DockPanel>
+              <Button Name="PART_Tab" DockPanel.Dock="Left" Padding="0" Width="34" MinHeight="150"
+                      VerticalAlignment="Stretch" VerticalContentAlignment="Center" HorizontalContentAlignment="Center"
+                      ToolTip.Tip="Show / hide">
+                <LayoutTransformControl>
+                  <LayoutTransformControl.LayoutTransform><RotateTransform Angle="-90"/></LayoutTransformControl.LayoutTransform>
+                  <TextBlock Text="{TemplateBinding Title}" FontSize="12" Foreground="#FCD8A8"/>
+                </LayoutTransformControl>
+              </Button>
+              <ContentPresenter Content="{TemplateBinding Content}" IsVisible="{TemplateBinding IsOpen}" Margin="10"/>
+            </DockPanel>
+          </Border>
+        </ControlTemplate>
+      </Setter>
+    </Style>
+    <Style Selector="Border.panel">
+      <Setter Property="Background" Value="{StaticResource NesPanel}"/>
+      <Setter Property="BorderBrush" Value="#FCFCFC"/>
+      <Setter Property="BorderThickness" Value="3"/>
+      <Setter Property="CornerRadius" Value="0"/>
+    </Style>
+    <Style Selector="ListBox"><Setter Property="Background" Value="#000000"/></Style>
+    <Style Selector="ProgressBar">
+      <Setter Property="Foreground" Value="#00A800"/>
+      <Setter Property="Background" Value="#000000"/>
+      <Setter Property="CornerRadius" Value="0"/>
+    </Style>
   </Application.Styles>
 </Application>

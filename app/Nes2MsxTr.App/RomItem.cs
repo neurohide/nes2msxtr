@@ -19,6 +19,18 @@ public class RomItem : INotifyPropertyChanged
     public bool Published { get => _published; set { _published = value; Raise(); Raise(nameof(PublishedMark)); } }
     public string PublishedMark => Published ? "published" : "";
 
+    int _crashes;
+    /// <summary>crash-N.txt / .omr traces saved in build/&lt;game&gt;/ by a run that stopped</summary>
+    public int Crashes { get => _crashes; set { _crashes = value; Raise(); Raise(nameof(FixMark)); } }
+    public string FixMark => Crashes > 0 ? $"ready to fix ({Crashes})" : "";
+
+    public void RefreshCrashes(string? root)
+    {
+        var dir = root == null ? null : System.IO.Path.Combine(root, "build", Name);
+        Crashes = dir != null && Directory.Exists(dir)
+            ? Directory.EnumerateFiles(dir, "crash-*.txt").Count() : 0;
+    }
+
     /// <summary>File name in published/: "Bubble Bobble (USA).nes" -> bubblebobble.rom</summary>
     public string Slug
     {

@@ -168,3 +168,9 @@ replay passes, that's a sign it's hitting an actual limit — check
 [docs/TECHNICAL.md](TECHNICAL.md)'s Limits section (mapper coverage, the
 DMC channel, MMC3 PRG mode 1, etc.) before assuming it's a missing
 entry.
+
+## Optional: the desktop app
+
+A window that does steps 1 and 2 for several ROMs at once (dependency
+checklist, ROM list with hashes, convert, log) is in `app/`. On Windows run
+its Linux build inside WSL; see [app/README.md](../app/README.md).

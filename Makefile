@@ -37,7 +37,7 @@ ROM_SIGNATURE := $(shell python3 -c 'import hashlib,sys; print(hashlib.sha1(open
 ROM_ENTRIES := $(OUT)/entries.$(ROM_SIGNATURE).txt
 ROM_ENTRIES_ESC := $(call escape,$(ROM_ENTRIES))
 OUT_ENTRIES := $(shell test -f "$(ROM_ENTRIES)" && printf '%s' "$(ROM_ENTRIES_ESC)")
-SAMPLES := contra doubledragonii supermariobros
+SAMPLES := nova
 FRAMES ?= 210
 PROFILE_SECS ?= 40
 

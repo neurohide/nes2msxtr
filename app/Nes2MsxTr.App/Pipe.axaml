@@ -1,0 +1,19 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Nes2MsxTr.App.Pipe" Width="48" RenderOptions.EdgeMode="Aliased">
+  <!-- a warp pipe: black outline, green body, light left edge, dark right edge; Height sets its length -->
+  <Grid RowDefinitions="20,*">
+    <Grid>
+      <Rectangle Fill="#000000"/>
+      <Rectangle Fill="#00A800" Margin="4"/>
+      <Rectangle Fill="#B8F818" Margin="8,4,28,4"/>
+      <Rectangle Fill="#005800" Margin="36,4,4,4"/>
+    </Grid>
+    <Grid Grid.Row="1" Margin="4,0">
+      <Rectangle Fill="#000000"/>
+      <Rectangle Fill="#00A800" Margin="4,0"/>
+      <Rectangle Fill="#B8F818" Margin="8,0,24,0"/>
+      <Rectangle Fill="#005800" Margin="28,0,4,0"/>
+    </Grid>
+  </Grid>
+</UserControl>
