@@ -683,6 +683,21 @@ em_out: pop ix
         pop bc
         pop af
         ret
+; RTS at a negative stack depth (it returns past the routine's own frame): when
+; a dispatcher mark sits at s6_ptr, the two bytes there are the return address
+; this RTS pops. Without it they would stay on the 6502 stack for good.
+rts_pop:
+        ex af, af'
+        call eng_find
+        jr nz, rp_ret
+        ld hl, (s6_ptr)
+        inc l
+        inc l
+        ld (s6_ptr), hl
+rp_ret: ex af, af'
+        ret
+rts_trace:                      ; debug (NES2MSX_RTSTRACE): break here, the caller is the RTS
+        ret
 eng_find:
         push bc
         push de

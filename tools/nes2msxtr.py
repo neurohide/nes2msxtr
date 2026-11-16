@@ -360,7 +360,13 @@ class Translator:
             self.warn.append(f"${a:04X}: RTS at stack depth {d} not supported")
         if m == "RTI" and self.mem.mmc1: return ["jp rti_rt"]
         if m == "RTI": return ["jp rti_go"]
-        return (["ld hl,s6_ptr", "inc (hl)", "inc (hl)"] if self.faithful else []) + ["ret"]
+        if m == "RTS" and (a in self.P.neg_rts or d < 0 and d % 2 == 0) and self.multi and not self.faithful and self.eng_marked():
+            # this RTS pops the pair a dispatcher's caller pushed (eng_mark):
+            # the Z80 RET returns for it, rts_pop discards the bytes
+            return ["jp rts_pop"]
+        # NES2MSX_RTSTRACE=1: a debugger breakpoint on rts_trace sees every plain RTS
+        return (["ld hl,s6_ptr", "inc (hl)", "inc (hl)"] if self.faithful else []) + \
+            (["call rts_trace"] if os.environ.get("NES2MSX_RTSTRACE") else []) + ["ret"]
 
     def rts_depth(self, a):
         """Stack depth the RTS at a is translated for: 2 when it dispatches
@@ -570,7 +576,7 @@ class Translator:
                 L += [f"ld hl,{arg + 1}", "call wram_rd", "ld b,l", f"ld hl,{arg}", "call wram_rd", "ld h,b", "ld b,0", "jp dyn_jump"]
             else:
                 self.warn.append(f"${a:04X}: JMP (${arg:04X}) through I/O space")
-                L += ["jp crash"]
+                L += ["call crash"]
             return L, False
         elif m == "JSR":
             ret = (a + 2) & 0xFFFF
@@ -600,7 +606,7 @@ class Translator:
             L += [("JP", t)] if t is not None else [f"ld hl,{self.P.vectors['IRQ']}", "jp dyn_jump"]
             return L, False
         elif m == "BRK":
-            self.warn.append(f"${a:04X}: BRK"); L += ["jp crash"]; return L, False
+            self.warn.append(f"${a:04X}: BRK"); L += ["call crash"]; return L, False
         else:
             raise RuntimeError(f"unhandled {m}")
         return L, True
@@ -753,7 +759,7 @@ def emit_banks(banks, multi, cap=None, profile=None):
     clones = plan_clones(banks, cap, profile) if multi and cap else {}
     files, nstub, missing = [], 0, set()
     for bi, items in enumerate(banks):
-        out = ["        org $0000", "        jp crash", "        defs $0038 - $, 0",
+        out = ["        org $0000", "        call crash", "        defs $0038 - $, 0",
                "        jp isr", "        defs $0100 - $, 0"]
         stubs = []
         mine = clones.get(bi, set())
@@ -1275,5 +1281,8 @@ if __name__ == "__main__":
                     help="picture shown for 3 s at boot (256 wide, up to 212 high, 16-colour PNG; '' for none)")
     ap.add_argument("--no-interp", action="store_true",
                     help="no 6502 interpreter bank: a jump to an untraced address stops (discover.py uses this)")
+    ap.add_argument("--faithful", action="store_true",
+                    help="keep JSR return addresses on the 6502 stack too (slower, exact; TSX games get it anyway)")
     a = ap.parse_args()
+    FORCE_FAITHFUL = a.faithful
     build(a.rom, a.out, a.crop, a.bank_kb, a.pad_kb, a.splash, not a.no_interp)

@@ -15,7 +15,9 @@ Contra infinite lives on each level: "32=09,30=00;32=09,30=01;...".
 
 usage: discover.py game.nes out_dir [seconds] [rounds]
 """
-import hashlib, os, re, subprocess, sys
+import glob, hashlib, os, re, subprocess, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from nestrace import OPS
 
 rom, out = sys.argv[1], sys.argv[2]
 secs = sys.argv[3] if len(sys.argv) > 3 else "90"
@@ -59,12 +61,30 @@ def unknown_target(d, lbl, play, poke):
     if not addr:
         return None
     bank = v[j]
+    # data, not missing code: the first byte is no opcode, or the address sits
+    # in a long run of ROM pointers (a table entered through a wrong pointer);
+    # adding it only moves the crash
+    banks = sorted(glob.glob(os.path.join(d, "..", "prg[0-9]*.bin")))
+    if banks and addr >= 0x8000:
+        prg = open(banks[-1] if addr >= 0xC000 else banks[min(bank, len(banks) - 1)], "rb").read()
+        o = addr & 0x3FFF
+        runs = []
+        for par in (0, 1):                      # words at either alignment
+            lo = hi = o - (o - par) % 2
+            while lo >= 2 and prg[lo - 1] >= 0x80: lo -= 2
+            while hi + 1 < len(prg) and prg[hi + 1] >= 0x80: hi += 2
+            runs.append((hi - lo) // 2)
+        if o < len(prg) and (prg[o] not in OPS or max(runs) >= 16):
+            faults.append(f"{d}: jump to ${addr:04X} (bank {bank}) is data (opcode ${prg[o]:02X}, {max(runs)} pointers around it); "
+                          "a pointer or index was corrupted before the jump: replay the crash and check the dispatch that read it")
+            return None
     line = f"{bank:x} {addr:04x}" if 0x8000 <= addr < 0xC000 else f"- {addr:04x}"
     return line, bank, addr
 
 
 for r in range(rounds):
     build = [sys.executable, os.path.join(here, "nes2msxtr.py"), rom, out, "--no-interp"]
+    if os.environ.get("DISCOVER_FAITHFUL"): build.append("--faithful")
     if "DISCOVER_SPLASH" in os.environ:
         build += ["--splash", os.environ["DISCOVER_SPLASH"]]
     b = subprocess.run(build, capture_output=True, text=True)

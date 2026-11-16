@@ -111,6 +111,7 @@
         <WrapPanel>
           <TextBlock Text="Discover:" VerticalAlignment="Center" Margin="0,0,6,0"/>
           <CheckBox Name="DiscoverChk" Content="run" IsChecked="True"/>
+          <CheckBox Name="FaithfulChk" Content="faithful (slower, exact stack)" IsChecked="False" Margin="12,0,0,0"/>
           <CheckBox Name="CleanChk" Content="clean traces after build" IsChecked="True" Margin="12,0,0,0"/>
           <TextBlock Text="seconds" VerticalAlignment="Center" Margin="6,0"/>
           <NumericUpDown Name="SecsNum" Value="100" Minimum="10" Maximum="600" Width="170" FontSize="9"/>

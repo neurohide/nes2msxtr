@@ -194,13 +194,16 @@ public partial class MainWindow : Window
                 ["DISCOVER_PLAY"] = PlayBox.SelectedIndex == 0 ? "1" : "2",
                 ["OPENMSX"] = _deps.OpenMsxPath,
             };
+            if (FaithfulChk.IsChecked == true) env["DISCOVER_FAITHFUL"] = "1";
             var rc = await Py(new[] { Path.Combine("tools", "discover.py"), r.Path, outDir,
                 ((int)(SecsNum.Value ?? 100)).ToString(), ((int)(RoundsNum.Value ?? 14)).ToString() }, env);
             if (rc != 0) Log($"discover exited with {rc} (continuing with the entries found so far)");
         }
 
         Ui(() => r.Status = "build");
-        var rc2 = await Py(new[] { Path.Combine("tools", "nes2msxtr.py"), r.Path, outDir });
+        var build = new List<string> { Path.Combine("tools", "nes2msxtr.py"), r.Path, outDir };
+        if (FaithfulChk.IsChecked == true) build.Add("--faithful");
+        var rc2 = await Py(build);
         var built = Path.Combine(outDir, r.Name + ".rom");
         if (rc2 != 0 || !File.Exists(built)) { Log($"conversion failed (exit {rc2})"); return false; }
 

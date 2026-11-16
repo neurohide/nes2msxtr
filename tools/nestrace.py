@@ -1217,6 +1217,7 @@ def _stack_depth(P):
     """
     code = P.code
     depth, P.txs_restore, P.stack_switch_rts = {}, set(), set()
+    P.neg_rts = set()       # RTS walked at a negative depth on some path (see rts_pop)
     P.stack_switch_code = set()
     yielders = getattr(P, "yielders", set())
     tsx = any(c[1] == "TSX" for c in code.values())
@@ -1276,6 +1277,7 @@ def _stack_depth(P):
                 sw_seen.add(a)
                 P.stack_switch_code.add(a)
             n, m, mode, arg = code[a]
+            if m == "RTS" and d < 0 and d % 2 == 0: P.neg_rts.add(a)
             # where the depth changes the translation: returns, TXS, pulls of
             # the return address
             if other and (m in ("RTS", "RTI", "TXS") or m in ("PLA", "PLP") and min(depth[a], d) <= 0):
