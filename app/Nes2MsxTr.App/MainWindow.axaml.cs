@@ -48,6 +48,11 @@ public partial class MainWindow : Window
         AllBtn.Click += (_, _) => { foreach (var r in _roms) r.Selected = r.Supported; };
         NoneBtn.Click += (_, _) => { foreach (var r in _roms) r.Selected = false; };
         RefreshBtn.Click += (_, _) => LoadRoms();
+        CleanBuildBtn.Click += (_, _) => ClearBuild();
+        RomList.AddHandler(Button.ClickEvent, (_, e) =>
+        {
+            if (e.Source is Button { Tag: "play", DataContext: RomItem r }) Play(r);
+        });
         ClearBtn.Click += (_, _) => { lock (_logLock) { _log.Clear(); _logDirty = true; } };
         CancelBtn.Click += (_, _) => _cts?.Cancel();
         RunBtn.Click += async (_, _) => await ConvertAsync();
@@ -222,6 +227,42 @@ public partial class MainWindow : Window
         "cpu.txt", "omsx.log", "screen.png", "video.txt", "msx_ram.bin", "msx_vars.bin", "mapper_ram.bin",
         "psg_regs.bin", "v9990_pal.bin", "v9990_regs.bin", "v9990_vram.bin",
     };
+
+    // build/ outputs are regenerable; the discovery lists (entries.*.txt) are not
+    void ClearBuild()
+    {
+        var build = Root is { } r0 ? Path.Combine(r0, "build") : null;
+        if (build == null || !Directory.Exists(build)) { Log("no build folder"); return; }
+        int n = 0;
+        void Wipe(string dir)
+        {
+            foreach (var f in Directory.EnumerateFiles(dir))
+                if (!Path.GetFileName(f).StartsWith("entries.") || !f.EndsWith(".txt")) { File.Delete(f); n++; }
+            foreach (var d in Directory.EnumerateDirectories(dir)) { Directory.Delete(d, true); n++; }
+        }
+        try
+        {
+            Wipe(build);
+            foreach (var d in Directory.EnumerateDirectories(build)) Wipe(d);
+        }
+        catch (Exception ex) { Log($"clear: {ex.Message}"); }
+        Log($"cleared {n} items in build/ (entries.*.txt kept)");
+        foreach (var r in _roms) r.RefreshCrashes(Root);
+    }
+
+    // make run: builds if needed, plays in openMSX with crash recording (build/<game>/crash-*)
+    void Play(RomItem r)
+    {
+        if (Root is not { } root) { Log("project folder not found"); return; }
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo("make") { WorkingDirectory = root, UseShellExecute = false };
+            foreach (var a in new[] { "run", $"ROM={r.Path}", $"OPENMSX={_deps.OpenMsxPath}" }) psi.ArgumentList.Add(a);
+            System.Diagnostics.Process.Start(psi);
+            Log($"make run ROM={r.Name}");
+        }
+        catch (Exception ex) { Log($"cannot start make: {ex.Message}"); }
+    }
 
     void CleanTraces(string root, string outDir)
     {

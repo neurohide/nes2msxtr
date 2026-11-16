@@ -77,11 +77,11 @@
       <local:SlidePanel Name="GamesPanel" Grid.Row="1" Title="ROMS">
       <DockPanel>
         <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
-          <TextBlock Text="ROMs" Foreground="#FCD8A8" VerticalAlignment="Center"/>
           <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right">
             <Button Name="AllBtn" Content="All"/>
             <Button Name="NoneBtn" Content="None"/>
             <Button Name="RefreshBtn" Content="Refresh"/>
+            <Button Name="CleanBuildBtn" Content="Clear" ToolTip.Tip="Delete everything in build/ except the saved discovery lists (entries.*.txt)"/>
           </StackPanel>
         </DockPanel>
         <ListBox Name="RomList" SelectionMode="Single">
@@ -90,7 +90,12 @@
               <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
                 <CheckBox IsChecked="{Binding Selected}" IsEnabled="{Binding Supported}"/>
                 <StackPanel Grid.Column="1" ClipToBounds="True">
-                  <TextBlock Text="{Binding Name}"/>
+                  <StackPanel Orientation="Horizontal" Spacing="6">
+                    <TextBlock Text="{Binding Name}" VerticalAlignment="Center"/>
+                    <Button Tag="play" Content="&#x25B6;" IsVisible="{Binding Published}" Background="Transparent"
+                            BorderThickness="0" Foreground="#3DDC57" FontSize="14" Padding="4,0" MinHeight="0" MinWidth="0"
+                            VerticalAlignment="Center" ToolTip.Tip="Play in openMSX"/>
+                  </StackPanel>
                   <TextBlock FontSize="11" Foreground="#9C9CD0" FontFamily="Menlo,Consolas,monospace">
                     <Run Text="{Binding Sha1}"/><Run Text="  "/><Run Text="{Binding Info}"/>
                   </TextBlock>
