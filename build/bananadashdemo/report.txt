@@ -1,11 +1,11 @@
-input: sourcerom/bananadashdemo.nes
+input: /Users/neurohide/Sources/nes2msxtr-project/nes2msxtr/sourcerom/bananadashdemo.nes
 UxROM, PRG 512K, CHR RAM, mirroring horizontal
 6502 instructions: 28750, jump tables: 0, dispatchers: 0, computed-jump sites: 3, lookup entries: 2606
 stack: data only in page 1
 code banks: 7 (multi-bank)
 entry points from entries.txt: 44, found in pointer tables: 0
 mapper segments used: 4..55 (896K RAM needed, more than the turboR's 512K: runs from a RAM expansion (memory mapper))
-runtime blob: $D700-$F6CF
+runtime blob: $D700-$F748
 cartridge: bananadashdemo.rom, 1024K ASCII16
 warnings (13):
   $1F8E84: JMP ($7470) through I/O space

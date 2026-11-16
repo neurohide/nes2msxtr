@@ -8,10 +8,9 @@ public class Dep : INotifyPropertyChanged
     string _detail = "";
     bool? _ok;
     public string Name { get; init; } = "";
-    public bool? Ok { get => _ok; set { _ok = value; Raise(); Raise(nameof(Mark)); Raise(nameof(MarkBrush)); } }
+    public bool? Ok { get => _ok; set { _ok = value; Raise(); Raise(nameof(MarkBrush)); } }
     public string Detail { get => _detail; set { _detail = value; Raise(); } }
-    public string Mark => Ok switch { true => "OK", false => "NO", _ => ".." };
-    public Avalonia.Media.IBrush MarkBrush => Ok switch { true => Avalonia.Media.Brushes.LimeGreen, false => Avalonia.Media.Brushes.OrangeRed, _ => Avalonia.Media.Brushes.Gray };
+    public Avalonia.Media.IBrush MarkBrush => Ok switch { true => Avalonia.Media.Brushes.LimeGreen, false => Avalonia.Media.Brushes.Red, _ => Avalonia.Media.Brushes.Gray };
     public event PropertyChangedEventHandler? PropertyChanged;
     void Raise([CallerMemberName] string? n = null) => PropertyChanged?.Invoke(this, new(n));
 }

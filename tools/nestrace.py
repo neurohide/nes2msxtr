@@ -213,6 +213,8 @@ def trace(prg, kind="nrom", extra=()):
             if d is None or d[1] == "BRK": return False
             n, m, mode, arg = d
             if m in ("RTS", "RTI") or (m == "JMP" and mode == "ind"): return True
+            # a dispatcher call: an inline table follows, not code
+            if m == "JSR" and mem.at(a, arg) in P.engines: return True
             if m == "JMP":
                 a = mem.at(a, arg)
                 if a is None: return False
@@ -476,6 +478,10 @@ def trace(prg, kind="nrom", extra=()):
                     top = max(cnt.values(), default=0)
                     cand = [v for v in (mem.banked(rw(t), b) for b in range(mem.nbanks - 1) if cnt.get(b, 0) == top)
                             if call_candidate(v)]
+                    # none there: the banks that hold code at that address (a
+                    # mixed table: Castlevania's object cases at $E95C)
+                    cand = cand or [v for v in (mem.banked(rw(t), b) for b in range(mem.nbanks - 1))
+                                    if call_candidate(v)]
                     if not cand: break
                     tg += [v for v in cand if v not in tg]; t = canon(t + 2)
                     continue
@@ -1208,6 +1214,21 @@ def _bank_flow(P, code, engines, tables, dispatch):
 TBL_READS = {"LDA", "LDX", "LDY", "CMP", "CPX", "CPY", "ADC", "SBC", "AND", "ORA", "EOR", "BIT"}
 
 
+def pushed_before(code, a):
+    """PHAs (minus PLAs) in the straight-line code just before a."""
+    n = 0
+    for _ in range(8):
+        for k in (1, 2, 3):
+            if code.get(a - k, (0,))[0] == k: break
+        else: break
+        a -= k
+        m = code[a][1]
+        if m == "PHA": n += 1
+        elif m == "PLA": n -= 1
+        elif m in ENDS_FLOW or m in ("JSR", "BRK") or code[a][2] == "rel": break
+    return n
+
+
 def _stack_depth(P):
     """Depth (bytes pushed since the current routine was entered) per address.
 
@@ -1330,8 +1351,12 @@ def _stack_depth(P):
                 break
             if m in ENDS_FLOW or a in P.nofall: break
             if m == "JSR" and mem.at(a, arg) in P.engines:
-                # cases run at the dispatch site's depth (the engine pops its own return)
-                work += [(t, d, None, False, Z0) for t in P.tables.get(a, [])]
+                # cases run at the dispatch site's depth (the engine pops its own
+                # return); after PHA/PHA their RTS returns through the pushed
+                # pair, whatever depth the caller ran at (Castlevania $E959,
+                # in a routine entered at -2): depth 2, as a dispatch RTS
+                cd = 2 if pushed_before(code, a) >= 2 else d
+                work += [(t, cd, None, False, Z0) for t in P.tables.get(a, [])]
                 break
             if a in P.inline_cont:
                 work.append((P.inline_cont[a], d, sx, switched, Z0))

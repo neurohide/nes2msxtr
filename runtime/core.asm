@@ -610,24 +610,24 @@ xret:   ex af, af'
 ; needs the bank restored: the bank stack entry is kept and xret pushed.
 ; A dispatcher case's caller pushed its return address (PHA/PHA, then JSR
 ; dispatcher): eng_mark notes the stack pointer at those calls, newest first
-; (cases nest). eng_find: Z (and the mark cleared) when s6_ptr is one of them.
+; (cases nest). eng_find: Z (and the mark cleared) when s6_ptr is one of them
+; and the pair above it is still the one pushed then. A case that returned by
+; a plain RET leaves its mark; later pushes (an NMI's saved registers) can
+; overwrite the pair, and a plain JSR at that same depth must not pop them
+; (Castlevania: JSR $EF04 from $D25F, whose RTS jumped to $F00B).
 ; Preserves BC, DE; AF is the caller's scratch.
 eng_mark:
         push af
         push bc
         push de
         push ix
-        ld hl, 10               ; BC = the caller's SP once this returns
-        add hl, sp
-        ld b, h
-        ld c, l
         ld hl, 8
         add hl, sp
         ld e, (hl)
         inc hl
         ld d, (hl)              ; DE = the call site
         ld ix, eng_s6
-        ld a, 8
+        ld a, 6
 em_l:   push af
         ld a, (ix+2)
         cp e
@@ -648,6 +648,8 @@ em_l:   push af
         ld e, (hl)
         inc l
         ld d, (hl)
+        ld (ix+4), e            ; the mark now guards the new pair
+        ld (ix+5), d
         inc l
         ld (hl), e
         inc l
@@ -655,29 +657,36 @@ em_l:   push af
         dec l
         dec l
         ld (s6_ptr), hl
+        ld hl, 12               ; and the caller's SP now (+ the loop's push)
+        add hl, sp
+        ld (ix+6), l
+        ld (ix+7), h
         pop af
         jr em_out
-em_n:   inc ix
-        inc ix
-        inc ix
-        inc ix
-        inc ix
-        inc ix
+em_n:   ld bc, 8
+        add ix, bc
         pop af
         dec a
         jr nz, em_l
         push bc
         push de
-        ld hl, eng_s6 + 41
+        ld hl, eng_s6 + 39
         ld de, eng_s6 + 47
-        ld bc, 42
+        ld bc, 40
         lddr
         pop de
         pop bc
         ld hl, (s6_ptr)
         ld (eng_s6), hl
+        inc l                   ; BC = the pair the caller pushed
+        ld c, (hl)
+        inc l
+        ld b, (hl)
         ld (eng_s6 + 2), de
         ld (eng_s6 + 4), bc
+        ld hl, 10               ; the caller's SP once this returns
+        add hl, sp
+        ld (eng_s6 + 6), hl
 em_out: pop ix
         pop de
         pop bc
@@ -686,16 +695,10 @@ em_out: pop ix
 ; RTS at a negative stack depth (it returns past the routine's own frame): when
 ; a dispatcher mark sits at s6_ptr, the two bytes there are the return address
 ; this RTS pops. Without it they would stay on the 6502 stack for good.
+; The pair is the case's return address only when the RTS runs at the case's
+; own level (eng_chk): then it returns through it, as rts_eng.
 rts_pop:
-        ex af, af'
-        call eng_find
-        jr nz, rp_ret
-        ld hl, (s6_ptr)
-        inc l
-        inc l
-        ld (s6_ptr), hl
-rp_ret: ex af, af'
-        ret
+        jp rts_eng
 rts_trace:                      ; debug (NES2MSX_RTSTRACE): break here, the caller is the RTS
         ret
 eng_find:
@@ -703,7 +706,7 @@ eng_find:
         push de
         ld de, (s6_ptr)
         ld hl, eng_s6
-        ld b, 8
+        ld b, 6
 ef_l:   ld c, (hl)
         inc hl
         ld a, (hl)              ; mark below s6_ptr: its frame is gone, drop it
@@ -724,13 +727,32 @@ ef_nx:  inc hl
         inc hl
         inc hl
         inc hl
+        inc hl
+        inc hl
         djnz ef_l
         ld a, 1
         or a
         pop de
         pop bc
         ret
-ef_hit: xor a
+ef_hit: push hl                 ; HL = mark + 1, DE = s6_ptr
+        push de
+        inc hl
+        inc hl
+        inc hl
+        inc e
+        ld a, (de)
+        cp (hl)
+        jr nz, ef_pair
+        inc e
+        inc hl
+        ld a, (de)
+        cp (hl)
+ef_pair: pop de
+        pop hl
+        jr nz, ef_nx            ; the pair was overwritten: not this RTS's; the
+                                ; mark stays for eng_mark's slide
+        xor a
         ld (hl), a
         dec hl
         ld (hl), a
@@ -742,6 +764,14 @@ drop_frame:
         di
         ex af, af'
         call eng_find
+        jr nz, df_z80
+        push de                 ; PLA/PLA in a routine the case called (JSR
+        ex de, hl               ; $EEA7 in Castlevania's case $8ADA) drop
+        ld hl, 4                ; that routine's Z80 frame, not the pair
+        add hl, sp
+        ex de, hl               ; DE = the 6502 code's Z80 SP
+        call eng_chk
+        pop de
         jr nz, df_z80
 df_ps:  ld hl, (s6_ptr)         ; the caller pushed the case's return address:
         inc l                   ; pop those bytes, not a Z80 frame
@@ -1045,12 +1075,68 @@ rts_jump:
 ; RTS of a dispatcher case that expects its return address pushed by the caller
 ; (PHA/PHA, JSR dispatcher; eng_s6 marks that). A case reached by a plain
 ; JSR has no such pair: return through the Z80 frame.
+; A JSR at the mark's depth (Castlevania: case $8C51 does JSR $DD3D, itself a
+; case) has a Z80 return frame; the case's own RTS has none since the
+; dispatch, or only the xret far_jump pushed into another bank.
 rts_eng:
         ex af, af'
-        call eng_find
+        call eng_find           ; Z: HL = the mark (cleared)
+        jr nz, re_plain
+        push de
+        ex de, hl
+        ld hl, 2
+        add hl, sp
+        ex de, hl               ; DE = Z80 SP at this RTS
+        call eng_chk
+        pop de
         jr nz, re_plain
         ex af, af'
         jp rts_sw
+
+; HL = the mark eng_find hit (and cleared), DE = the Z80 SP of the 6502 code.
+; Z when that code runs at the case's own level: no Z80 frame since the
+; dispatch, or only the xret far_jump pushed. Else NZ and the mark is put
+; back for the case's own RTS. Keeps BC, DE, HL.
+eng_chk:
+        push bc
+        push hl
+        ld bc, 6
+        add hl, bc
+        ld c, (hl)
+        inc hl
+        ld b, (hl)              ; BC = Z80 SP at the dispatch
+        ld h, d
+        ld l, e
+        or a
+        sbc hl, bc
+        jr z, ec_out
+        inc hl
+        inc hl
+        ld a, h
+        or l
+        jr nz, ec_bad
+        ld a, (de)
+        cp xret & $FF
+        jr nz, ec_bad
+        inc de
+        ld a, (de)
+        dec de
+        cp xret >> 8
+        jr z, ec_out
+ec_bad: pop hl
+        push de
+        ld de, (s6_ptr)
+        ld (hl), e
+        inc hl
+        ld (hl), d
+        dec hl
+        pop de
+        or 1                    ; NZ
+        pop bc
+        ret
+ec_out: pop hl
+        pop bc
+        ret
 re_plain:
         ex af, af'
         ret

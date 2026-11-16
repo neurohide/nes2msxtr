@@ -438,6 +438,11 @@ if FAITHFUL
         ld (s6_ptr), hl
         exx
         pop af
+else
+        push af
+        call eng_is             ; Z: a dispatcher, which reads its return address
+        jr z, js_eng
+        pop af
 endif
         di
         ex af, af'
@@ -448,20 +453,108 @@ endif
         call far_call           ; interpreter (interp_entry reloads IY), whose
         pop iy                  ; RTS returns here (xret restores this bank)
         jp il
+if FAITHFUL
+else
+; JSR to a dispatcher (or an inline-table routine), as translated code does it:
+; eng_mark when the caller pushed the case's return address (PHA/PHA), the
+; 6502 return address pushed for the dispatcher to read, and a jump: the
+; case's RTS returns through the pushed bytes. HL = target, AF on the stack.
+js_eng: push hl
+        exx
+        pop bc                  ; BC' = target
+        push iy
+        pop de
+        dec de                  ; DE' = the return address - 1, as JSR pushes it
+        exx
+        push iy
+        pop hl
+        dec hl
+        dec hl
+        dec hl                  ; HL = this JSR
+        call eng_site
+        jr nz, js_e1
+        pop af                  ; eng_mark notes the Z80 SP the case runs at
+        call eng_mark
+        push af
+js_e1:  exx
+        ld hl, (s6_ptr)         ; push after eng_mark, as translated code
+        dec l
+        dec l
+        ld (s6_ptr), hl
+        inc l
+        ld (hl), e
+        inc l
+        ld (hl), d
+        push bc
+        exx
+        pop hl                  ; target
+        pop af
+        jp dyn_jump
+
+; HL = NES address: Z when it is in eng_tab / site_tab (count, then words).
+; Keeps BC, DE, HL; A is lost.
+eng_is: push de
+        ld de, eng_tab
+        jr il_has
+eng_site:
+        push de
+        ld de, site_tab
+il_has: push bc
+        ld a, (de)
+        ld c, a
+        inc de
+        ld a, (de)
+        ld b, a
+        inc de
+ih_l:   ld a, b
+        or c
+        jr z, ih_no
+        ld a, (de)
+        inc de
+        cp l
+        jr nz, ih_n
+        ld a, (de)
+        cp h
+        jr z, ih_out
+ih_n:   inc de
+        dec bc
+        jr ih_l
+ih_no:  inc a                   ; A = 1: NZ
+ih_out: pop bc
+        pop de
+        ret
+endif
 js_int: ex af, af'
         ei
         push iy                 ; interpreted routine: nested, its RTS returns
         ld iy, (bad_addr)
         call il
-        pop iy
+js_ret: pop iy
         jp il
 x_rts:
 if FAITHFUL
         ld hl, s6_ptr
         inc (hl)
         inc (hl)
-endif
         ret
+else
+        pop hl                  ; the RTS of a nested interpreted JSR: back to js_ret
+        push hl
+        push af
+        ld a, h
+        cp js_ret >> 8
+        jr nz, xr_eng
+        ld a, l
+        cp js_ret & $FF
+        jr nz, xr_eng
+        pop af
+        ret
+; Otherwise the code was reached by a jump (e.g. a dispatcher case that jumps
+; into untranslated code: Castlevania $F546 JMP $80E3) or called from
+; translated code: rts_eng pops the pair a dispatcher call pushed, if any.
+xr_eng: pop af
+        jp rts_eng
+endif
 
 ; BRK, RTI and the unofficial opcodes: stop. bad_addr = the opcode's address.
 x_bad:  push iy

@@ -10,6 +10,7 @@ public partial class MainWindow : Window
 {
     readonly Deps _deps = new();
     readonly ObservableCollection<RomItem> _roms = new();
+    readonly ObservableCollection<RomItem> _shown = new();     // _roms through the status filter
     readonly StringBuilder _log = new();
     readonly DispatcherTimer _flush = new() { Interval = TimeSpan.FromMilliseconds(120) };
     readonly object _logLock = new();
@@ -21,7 +22,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         DepList.ItemsSource = _deps.All.ToList();
-        RomList.ItemsSource = _roms;
+        RomList.ItemsSource = _shown;
         _flush.Tick += (_, _) => FlushLog();
         // a closed games panel gives its space back
         GamesPanel.PropertyChanged += (_, e) =>
@@ -29,6 +30,16 @@ public partial class MainWindow : Window
             if (e.Property == SlidePanel.IsOpenProperty)
                 LeftGrid.RowDefinitions[1].Height = GamesPanel.IsOpen ? new GridLength(1, GridUnitType.Star) : GridLength.Auto;
         };
+        // settings / deps tabs: a click shows that pane, a click on the shown one hides it
+        foreach (var (tab, pane, other) in new[] { (SettingsTab, (Control)SettingsPane, (Control)DepsPane), (DepsTab, DepsPane, SettingsPane) })
+            tab.Click += (_, _) =>
+            {
+                pane.IsVisible = !pane.IsVisible;
+                other.IsVisible = false;
+                SettingsTab.Classes.Set("on", SettingsPane.IsVisible);
+                DepsTab.Classes.Set("on", DepsPane.IsVisible);
+            };
+        SettingsTab.Classes.Add("on");
         LogToggle.Click += (_, _) => SetLog(!LogPanel.IsVisible);
         _flush.Start();
 
@@ -45,7 +56,8 @@ public partial class MainWindow : Window
         DestBox.LostFocus += (_, _) => LoadRoms();
         CheckBtn.Click += async (_, _) => await RecheckAsync();
         InstallBtn.Click += async (_, _) => await InstallAsync();
-        AllBtn.Click += (_, _) => { foreach (var r in _roms) r.Selected = r.Supported; };
+        AllBtn.Click += (_, _) => { foreach (var r in _shown) r.Selected = true; };
+        FilterBox.SelectionChanged += (_, _) => Refilter();
         NoneBtn.Click += (_, _) => { foreach (var r in _roms) r.Selected = false; };
         RefreshBtn.Click += (_, _) => LoadRoms();
         CleanBuildBtn.Click += (_, _) => ClearBuild();
@@ -125,6 +137,7 @@ public partial class MainWindow : Window
     void LoadRoms()
     {
         _roms.Clear();
+        _shown.Clear();
         var dir = RomsBox.Text;
         if (string.IsNullOrWhiteSpace(dir) || !Directory.Exists(dir)) return;
         var root = Root;
@@ -139,10 +152,33 @@ public partial class MainWindow : Window
                 r.Published = pub != null && File.Exists(Path.Combine(pub, r.Slug));
                 r.RefreshCrashes(root);
                 if (!r.Supported) r.Status = "unsupported";
-                Ui(() => _roms.Add(r));
+                Ui(() =>
+                {
+                    r.PropertyChanged += (_, e) => { if (e.PropertyName is nameof(RomItem.Published) or nameof(RomItem.Crashes)) Refilter(); };
+                    _roms.Add(r);
+                    if (Match(r)) _shown.Add(r);
+                });
             }
         });
     }
+
+    // the status filter above the list (FilterBox: all, published, not published, ready to fix, unsupported)
+    void Refilter()
+    {
+        var want = _roms.Where(Match).ToList();
+        if (want.SequenceEqual(_shown)) return;
+        _shown.Clear();
+        foreach (var r in want) _shown.Add(r);
+    }
+
+    bool Match(RomItem r) => FilterBox.SelectedIndex switch
+    {
+        1 => r.Published,
+        2 => !r.Published,
+        3 => r.Crashes > 0,
+        4 => !r.Supported,
+        _ => true,
+    };
 
     // ----- conversion -----
     async Task ConvertAsync()
@@ -150,7 +186,7 @@ public partial class MainWindow : Window
         var root = Root;
         if (root == null) return;
         var dest = string.IsNullOrWhiteSpace(DestBox.Text) ? Path.Combine(root, "published") : DestBox.Text!;
-        var todo = _roms.Where(r => r.Selected && r.Supported).ToList();
+        var todo = _roms.Where(r => r.Selected).ToList();
         if (todo.Count == 0) { Log("select at least one ROM"); return; }
         _logArmed = true;
         _cts = new CancellationTokenSource();

@@ -15,7 +15,9 @@ public class RomItem : INotifyPropertyChanged
     public string Info { get; init; } = "";
     public bool Supported { get; init; }
     public bool Selected { get => _sel; set { _sel = value; Raise(); } }
-    public string Status { get => _status; set { _status = value; Raise(); } }
+    public string Status { get => _status; set { _status = value; Raise(); Raise(nameof(Busy)); Raise(nameof(Done)); } }
+    public bool Busy => Status is "queued" or "discover" or "build";
+    public bool Done => Status == "done";
     public bool Published { get => _published; set { _published = value; Raise(); Raise(nameof(PublishedMark)); } }
     public string PublishedMark => Published ? "published" : "";
 

@@ -287,18 +287,7 @@ class Translator:
         return self._eng_marked
 
     def pushed_before(self, a):
-        """PHAs (minus PLAs) in the straight-line code just before a."""
-        code, n = self.P.code, 0
-        for _ in range(8):
-            for k in (1, 2, 3):
-                if code.get(a - k, (0,))[0] == k: break
-            else: break
-            a -= k
-            m = code[a][1]
-            if m == "PHA": n += 1
-            elif m == "PLA": n -= 1
-            elif m in nestrace.ENDS_FLOW or m in ("JSR", "BRK") or code[a][2] == "rel": break
-        return n
+        return nestrace.pushed_before(self.P.code, a)
 
     @staticmethod
     def pull_a(k=1):
@@ -989,8 +978,9 @@ def read_entries(path, mem):
             out.append(a)
     return out
 
-def interp_bank():
-    """Source of the interpreter bank (runtime/interp.asm): preamble, opcode table, stubs."""
+def interp_bank(T):
+    """Source of the interpreter bank (runtime/interp.asm): preamble, opcode table, stubs,
+    and the dispatchers its JSR must enter as translated code does (see x_jsr)."""
     mem = {"LDA", "LDX", "LDY", "AND", "ORA", "EOR", "ADC", "SBC", "CMP", "CPX", "CPY", "BIT",
            "STA", "STX", "STY", "ASL", "LSR", "ROL", "ROR", "INC", "DEC"}
     tab, stubs = [], []
@@ -1013,7 +1003,14 @@ def interp_bank():
     src = open(os.path.join(RUNTIME, "interp.asm")).read()
     pre = ["        org $0000", "        jp crash", "        defs $0038 - $, 0",
            "        jp isr", "        defs $0100 - $, 0"]
-    body = src.replace(";@TABLE@", "\n".join(t + stubs))
+    P = T.P
+    eng = sorted({e & 0xFFFF for e in P.engines | P.inline})
+    sites = sorted({a & 0xFFFF for a, d in P.code.items() if d[1] == "JSR"
+                    and P.mem.at(a, d[3]) in P.engines and T.multi and not T.faithful
+                    and T.pushed_before(a) >= 2})
+    words = lambda name, ws: [f"{name}:", f"        dw {len(ws)}"] + \
+        [f"        dw {', '.join(f'${w:04X}' for w in ws[i:i + 8])}" for i in range(0, len(ws), 8)]
+    body = src.replace(";@TABLE@", "\n".join(t + stubs + words("eng_tab", eng) + words("site_tab", sites)))
     return "\n".join(pre) + "\n" + body + "\n        defs $8000 - $, $ff\n"
 
 
@@ -1208,7 +1205,7 @@ def build(rom_path, out_dir, crop, bank_kb, pad_kb=0, splash=None, interp=True):
     t += ["s0row:"] + db_lines(s0)
     t += ["spr_lut_src:"] + db_lines(lut)
     w("tables.asm", "\n".join(t) + "\n")
-    if interp: w("interp.asm", interp_bank())
+    if interp: w("interp.asm", interp_bank(T))
 
     main = [f'        include "config.asm"', f'        include "{RUNTIME}/defs.asm"',
             "        org $4000", f'        include "{RUNTIME}/boot.asm"', "blob_src:",
