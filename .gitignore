@@ -17,3 +17,5 @@ testrom/*.lbl
 testrom/*.chr
 # Release copies
 published/
+# Release packages (make itch)
+dist/

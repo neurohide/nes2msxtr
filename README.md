@@ -118,11 +118,32 @@ them missing until openMSX finds them.
 
 ## Desktop app
 
-`app/` has a small cross-platform window (.NET 8, Avalonia) that checks and
-installs the dependencies, lists `sourcerom/` with the SHA-1 of each ROM, and
-runs discover, conversion and publishing for the ROMs you tick, with the log
-beside it. Start it with `dotnet run --project app/Nes2MsxTr.App`; steps for
-macOS, Linux and Windows (WSL or native) and the single-file builds are in
+`app/` has a small cross-platform front end (.NET 8, Avalonia) that makes the
+conversion easier to manage. Instead of typing `make discover` and `make` for
+each game, you tick the ROMs and press **Convert**.
+
+![nes2msxtr app: settings, ROM list and conversion log](docs/screenshots/app.png)
+
+*The app (Windows, Linux and macOS use the same window). This is a reference
+screenshot; the paths and ROMs shown are only an example.*
+
+- **SETTINGS** (top panel, click its tab to fold it): the project folder, the
+  ROMs folder (`sourcerom/`), the output folder (`published/` by default) and a
+  checklist of the dependencies: Python 3, z80asm, openMSX and the FS-A1GT
+  system ROMs. **Install missing** installs what a package manager can
+  (Homebrew, apt, winget); **Recheck** tests again.
+- **ROMs**: every `*.nes` in the ROMs folder with its SHA-1 and mapper. Tick one
+  or several. "published" marks a ROM already in the output folder, and a red
+  "ready to fix (N)" marks one with crash traces saved in `build/<game>/`.
+- **Convert**: for each ticked ROM it runs `tools/discover.py` (seconds, rounds
+  and play mode are set below the list), then `tools/nes2msxtr.py`, copies the
+  cartridge to the output folder, and, if "clean traces after build" is ticked,
+  deletes the crash traces and openMSX dumps from `build/<game>/`.
+- **LOG** (right, closed until something is logged): the output of every step,
+  scrolling. Open or close it with the `«` / `»` button on the right edge.
+
+Start it with `dotnet run --project app/Nes2MsxTr.App`. Steps for macOS, Linux
+and Windows (WSL or native) and the single-file builds are in
 [app/README.md](app/README.md).
 
 ## Layout

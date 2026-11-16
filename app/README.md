@@ -1,5 +1,7 @@
 # nes2msxtr app
 
+![nes2msxtr app](../docs/screenshots/app.png)
+
 A desktop front end for the converter (.NET 8 and Avalonia, one code base for
 Windows, Linux and macOS). It does what `make discover` and `make` do, for
 several ROMs at once:
