@@ -444,7 +444,9 @@ endif
         call dyn_find
         cp INTERP_BANK
         jr z, js_int
-        call far_call           ; returns here (xret restores this bank)
+        push iy                 ; the translated callee may jump back into the
+        call far_call           ; interpreter (interp_entry reloads IY), whose
+        pop iy                  ; RTS returns here (xret restores this bank)
         jp il
 js_int: ex af, af'
         ei

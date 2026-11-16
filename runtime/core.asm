@@ -837,6 +837,9 @@ nmi_late:
         ld a, 1
         ld (poll_seen), a
         pop af
+        push hl                 ; bad_addr, as in isr
+        ld hl, (bad_addr)
+        ex (sp), hl
         push af
         push bc
         push de
@@ -1315,10 +1318,12 @@ mem_wr_a:
         ld (wr_val), a
 ; HL = any NES address, value in (wr_val).
 mem_wr_v:
+        push af                 ; flags too: INC/DEC abs + BNE reads Z after this
         bit 7, h
-        jp nz, mw_rom
-        push af
-        ld a, h
+        jr z, mw_lo
+        pop af
+        jp mw_rom
+mw_lo:  ld a, h
         cp $20
         jr nc, mw_io
         and $07
@@ -1415,7 +1420,10 @@ io_r_open:
 ; ---------------------------------------------------------------------------
 ; Interrupt handler (IM 1, via $0038 in every code bank).
 isr:
-        push af
+        push hl                 ; bad_addr under the frame: an NMI that misses in
+        ld hl, (bad_addr)       ; dyn_find overwrites it, and the interrupted code
+        ex (sp), hl             ; may be between its own miss and interp_entry /
+        push af                 ; js_int reading it (both run after EI)
         push bc
         push de
         push hl
@@ -1540,6 +1548,9 @@ isr_same:
         pop de
         pop bc
         pop af
+        ex (sp), hl             ; restore bad_addr (see isr)
+        ld (bad_addr), hl
+        pop hl
         ei
         ret
 

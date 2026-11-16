@@ -1752,6 +1752,21 @@ pa_t0:  ld de, s0row
         ld a, h
         and $1F
         ld h, a
+        ; The V9990 takes SCAY bits 8+ only at the frame start: a mid-frame
+        ; write changes the low byte alone. With the vertical-mirroring copy
+        ; (rows 30-59 = rows 0-29), the same image is 240 lines up.
+        ld a, (vregs + 1)       ; the top's Y (calc_scroll above)
+        cp h
+        jr z, pa_hiok
+        ld a, (mir_v)
+        or a
+        jr z, pa_hiok
+        ld a, (vm_dup)
+        or a
+        jr z, pa_hiok
+        ld de, -240
+        add hl, de
+pa_hiok:
         ld (bot_regs), hl
         pop af
 if MMC3

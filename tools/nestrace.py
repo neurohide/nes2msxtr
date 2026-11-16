@@ -1350,7 +1350,9 @@ def _yielders(P):
     """Entry addresses of routines that (transitively) reach a TXS that
     selects another stack: the cooperative-task switchers and their callers."""
     code, mem = P.code, P.mem
-    txs = {a for a, c in code.items() if c[1] == "TXS" and a not in P.txs_restore}
+    # LDX #$FF / TXS only empties the stack (RESET, soft reset): no task switch
+    txs = {a for a, c in code.items() if c[1] == "TXS" and a not in P.txs_restore
+           and code.get(a - 2) != (2, "LDX", "imm", 0xFF)}
     calls, hit = {}, {}
     def scan(t):
         if t in calls: return
