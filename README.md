@@ -146,6 +146,36 @@ Start it with `dotnet run --project app/Nes2MsxTr.App`. Steps for macOS, Linux
 and Windows (WSL or native) and the single-file builds are in
 [app/README.md](app/README.md).
 
+### Installers
+
+The installers carry the app and the project files (no ROMs). The app icon
+is made from `assets/0-nes-to-msx-turbor.png` by `make icon`.
+
+- **macOS**: build the disk image with
+  ```
+  make installer VERSION=1.2             # Apple silicon
+  make installer VERSION=1.2 RID=osx-x64 # Intel
+  ```
+  It writes `dist/nes2msxtr-1.2-osx-arm64.dmg`. Open it and drag
+  `nes2msxtr.app` to Applications. The first start copies the project to
+  `~/nes2msxtr`, where your ROMs (`sourcerom/`) and the builds go. The app is
+  not notarized: the first time, open it with right-click, **Open**.
+- **Windows**: on Windows, with the .NET 8 SDK, Python 3 and Inno Setup 6
+  (`winget install JRSoftware.InnoSetup`), run
+  ```
+  powershell -ExecutionPolicy Bypass -File installer\windows.ps1 1.2
+  ```
+  It writes `dist\nes2msxtr-1.2-win-x64-setup.exe`. The setup installs for
+  the current user, without admin rights, into
+  `%LOCALAPPDATA%\Programs\nes2msxtr`, adds a Start menu entry (a desktop
+  shortcut is optional) and an uninstaller. Put your ROMs in its `sourcerom\`
+  folder. SmartScreen may warn about the unsigned setup: **More info**, then
+  **Run anyway**.
+
+The dependencies (Python 3, z80asm, openMSX, the FS-A1GT system ROMs) are not
+in the installers: use **Install missing** in the app, or see
+[Installing dependencies](#installing-dependencies).
+
 ## Layout
 
 ```
@@ -165,11 +195,6 @@ nes2msxtr/
 1. Install the dependencies (once): `make deps`, or `tools\deps.cmd` on
    Windows. See [Installing dependencies](#installing-dependencies).
 2. Copy your ROM into `sourcerom/`, for example `sourcerom/mygame.nes`.
-   If the file name has spaces (as in most dumps), it's recommended to link
-   it under a short name without spaces and use that name from then on:
-   ```
-   ln -sfn "Bubble Bobble (USA).nes" sourcerom/bubblebobble.nes
-   ```
 3. Build it:
    ```
    make ROM=mygame
@@ -237,7 +262,7 @@ make test                 # translate the test ROMs and compare their RAM with
                           # a reference 6502 run, in openMSX
 make clean                # remove build/ (entries.txt included)
 make deps                 # install the build tools and openMSX (tools/deps.sh)
-make itch VERSION=1.0     # zip the tool (no ROMs) into dist/ for itch.io
+make itch VERSION=1.2     # zip the tool (no ROMs) into dist/ for itch.io
 ```
 
 Windows install, generating a ROM, the NROM happy path, and the

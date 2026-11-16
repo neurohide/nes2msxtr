@@ -3,7 +3,7 @@
         xmlns:local="using:Nes2MsxTr.App"
         x:Class="Nes2MsxTr.App.MainWindow"
         x:CompileBindings="False"
-        Title="NES > MSX TURBOR (VDP9990)" Width="1280" Height="800" MinWidth="900" MinHeight="560">
+        Title="NES > MSX TURBOR (VDP9990)" Icon="/Assets/icon.png" Width="1280" Height="800" MinWidth="900" MinHeight="560">
   <Grid RowDefinitions="Auto,*,Auto">
   <!-- Donkey Kong girder header -->
   <Border Grid.Row="0" Height="48" RenderOptions.EdgeMode="Aliased">

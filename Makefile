@@ -19,7 +19,9 @@
 #                                    40 s first, for games with an intro and menus)
 #   make test                        end-to-end check with the bundled test ROM
 #   make deps                        install the tools needed (tools/deps.sh)
-#   make itch VERSION=1.0            zip the tool (no ROMs) into dist/ for itch.io
+#   make itch VERSION=1.2            zip the tool (no ROMs) into dist/ for itch.io
+#   make installer VERSION=1.2       macOS .dmg into dist/ (Windows: installer/windows.ps1)
+#   make icon                        regenerate the app icons from assets/
 
 ROM ?= testrom/testrom.nes
 SOURCEROM ?= sourcerom
@@ -138,6 +140,15 @@ OPENMSX ?= $(firstword $(wildcard /Applications/openMSX.app/Contents/MacOS/openm
 itch:
 	python3 tools/package_tool.py $(VERSION)
 
+# macOS disk image (RID=osx-x64 for Intel); the Windows setup is installer/windows.ps1
+VERSION ?= 1.2
+RID ?= osx-arm64
+installer:
+	installer/macos.sh $(VERSION) $(RID)
+
+icon:
+	python3 tools/make_icon.py
+
 clean:
 	rm -rf build
 
@@ -145,4 +156,4 @@ clean:
 deps:
 	tools/deps.sh
 
-.PHONY: all deps samples test test-testrom test-stacktest test-uxtest test-mmc3 test-ramext profile discover run replay itch clean
+.PHONY: all deps samples test test-testrom test-stacktest test-uxtest test-mmc3 test-ramext profile discover run replay itch installer icon clean

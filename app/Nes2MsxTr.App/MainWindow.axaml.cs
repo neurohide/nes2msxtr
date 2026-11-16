@@ -32,7 +32,7 @@ public partial class MainWindow : Window
         LogToggle.Click += (_, _) => SetLog(!LogPanel.IsVisible);
         _flush.Start();
 
-        var root = Deps.FindProject(AppContext.BaseDirectory) ?? Deps.FindProject(Environment.CurrentDirectory);
+        var root = Deps.FindProject(AppContext.BaseDirectory) ?? Deps.FindProject(Environment.CurrentDirectory) ?? Deps.FromBundle();
         RootBox.Text = root ?? "";
         RomsBox.Text = root != null ? Path.Combine(root, "sourcerom") : "";
         DestBox.Text = root != null ? Path.Combine(root, "published") : "";

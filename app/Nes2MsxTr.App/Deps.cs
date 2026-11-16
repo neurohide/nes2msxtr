@@ -36,6 +36,26 @@ class Deps
         return null;
     }
 
+    // macOS .app: the project ships read-only in Contents/Resources/project; the
+    // first start copies it to ~/nes2msxtr, where build/ and published/ can be written.
+    // shortcut: an existing ~/nes2msxtr is kept as is, so a newer installer does not update it.
+    public static string? FromBundle()
+    {
+        var src = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "Resources", "project"));
+        if (!File.Exists(Path.Combine(src, "tools", "nes2msxtr.py"))) return null;
+        var dst = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "nes2msxtr");
+        if (FindProject(dst) == dst) return dst;
+        foreach (var f in Directory.EnumerateFiles(src, "*", SearchOption.AllDirectories))
+        {
+            var to = Path.Combine(dst, Path.GetRelativePath(src, f));
+            Directory.CreateDirectory(Path.GetDirectoryName(to)!);
+            File.Copy(f, to, true);         // keeps the exec bit of the .sh / .py scripts
+        }
+        foreach (var d in Directory.EnumerateDirectories(src, "*", SearchOption.AllDirectories))
+            Directory.CreateDirectory(Path.Combine(dst, Path.GetRelativePath(src, d)));
+        return dst;
+    }
+
     public async Task CheckAsync(string? root, Action<string> log, CancellationToken ct)
     {
         foreach (var d in All) { d.Ok = null; d.Detail = "checking"; }
