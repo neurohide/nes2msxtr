@@ -1404,11 +1404,11 @@ su_vwaddr:
 
 ; E = tile low byte, C = key high byte (flips and palette in $C3, tile bit 8
 ; in bit 3, 8x16 in bit 2) -> A = V9990 pattern, uploaded on a miss. Probes
-; 8 slots from a hash of the key; a miss takes the first slot not used yet
+; 4 slots from a hash of the key; a miss takes the first slot not used yet
 ; in this pass. Carry set if it uploaded. Clobbers BC, DE, HL.
 su_find:
         ld a, e                 ; hash: tile x5 (runs of tiles don't pile into
-        add a, a                ; one window; a slot outside the 8 probed is
+        add a, a                ; one window; a slot outside the 4 probed is
         add a, a                ; never found again) ^ key bits x32
         add a, e
         ld l, a
@@ -1418,7 +1418,7 @@ su_find:
         rrca
         xor l
         ld l, a
-        ld d, 8
+        ld d, 4
         ld b, 0                 ; B = age of the victim slot (in sp_free)
 sf_l:   ld h, SC_TLO >> 8
         ld a, (hl)
