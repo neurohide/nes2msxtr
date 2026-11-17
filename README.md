@@ -21,30 +21,85 @@ emulates the NES picture, sound and mapper on the MSX hardware.
 >
 > Only use it on game images you own and have the right to convert.
 
+## Quick start
+
+Choose either route to convert and play a NES ROM on MSX turboR with a GFX9000
+(V9990), using openMSX or real hardware. Both routes use the same project,
+dependencies, and ROM folder.
+
+Install dependencies once: `make deps`, or `tools\deps.cmd` on Windows. See
+[Installing dependencies](#installing-dependencies).
+
+### Command line (power users)
+
+1. Copy your ROM into `sourcerom/`, for example `sourcerom/mygame.nes`.
+2. Build it:
+   ```sh
+   make ROM=mygame
+   ```
+   This writes `build/mygame/mygame.rom` and `build/mygame/report.txt`. The
+   report lists the mapper, RAM needed, code banks and translation warnings.
+3. Play it in openMSX:
+   ```sh
+   make run ROM=mygame
+   ```
+
+`ROM` can be a name in `sourcerom/` (with or without `.nes`) or any path.
+Some jump targets are found only while the game runs. If the game stops on one
+(red backdrop), `make run` adds it to
+`build/<game>/entries.<ROM-SHA1>.txt`; rebuild and play again. `make discover`
+finds targets automatically by playing the game headless (see
+[`samples/README.md`](samples/README.md)).
+
+### Desktop app
+
+1. Launch the app with `dotnet run --project app/Nes2MsxTr.App`, or use an
+   [installer](app/README.md).
+2. In **SETTINGS**, select the project folder and check that dependencies are
+   installed. Put your ROM in the configured ROMs folder (default:
+   `sourcerom/`).
+3. Select the ROM and click **Convert**. When conversion finishes, click its
+   **Play** button to run it in openMSX with the GFX9000.
+
+To play on real MSX turboR hardware, copy the generated cartridge from
+`published/` to the machine and run it with a GFX9000 attached.
+
+A jump to an address the tracer never saw is handled by a small 6502
+interpreter (`runtime/interp.asm`, one extra code bank). It runs the original
+bytes until execution reaches translated code again. This is slow, so the path
+still benefits from an entry target; `make discover` builds with `--no-interp`
+to make unknown jumps visible as stops. `--no-interp` saves one 32K bank of
+mapper RAM.
+
 ### Screenshots
 
-| Banana Dash Demo | Bubble Bobble | Contra |
+| Banana Dash Demo | Bubble Bobble |
+|---|---|
+| ![Banana Dash Demo running on MSX turboR](docs/screenshots/bananadashdemo.png) | ![Bubble Bobble running on MSX turboR](docs/screenshots/bubblebobble.png) |
+
+| Contra | Double Dragon II |
+|---|---|
+| ![Contra running on MSX turboR](docs/screenshots/contra.png) | ![Double Dragon II running on MSX turboR](docs/screenshots/doubledragonii.png) |
+
+| Super Mario Bros. |
+|---|
+| ![Super Mario Bros. running on MSX turboR](docs/screenshots/supermariobros.png) |
+
+*Screenshots show tested builds running in openMSX on a Panasonic FS-A1GT
+(R800) with a GFX9000.*
+
+### Tested and supported ROMs
+
+| Game | ROM image | Status |
 |---|---|---|
-| ![Banana Dash Demo running on MSX turboR](docs/screenshots/bananadashdemo.png) | ![Bubble Bobble running on MSX turboR](docs/screenshots/bubblebobble.png) | ![Contra running on MSX turboR](docs/screenshots/contra.png) |
+| Banana Dash Demo | `sourcerom/bananadashdemo.nes` | Included and tested |
 
-| Double Dragon II | Super Mario Bros. | Nova |
-|---|---|---|
-| ![Double Dragon II running on MSX turboR](docs/screenshots/doubledragonii.png) | ![Super Mario Bros. running on MSX turboR](docs/screenshots/supermariobros.png) | ![Nova running on MSX turboR](docs/screenshots/nova.png) |
+### Not distributed or not yet verified
 
-*Screenshots show sample builds running in openMSX on a Panasonic FS-A1GT
-(R800) with a GFX9000. The sample Nova build uses the ROM listed below.*
-
-### ROMs tested
-
-The sample was built and played from this image. Other dumps or
-revisions of the same games may need other `entries.txt` targets or may not
-work at all.
-
-| File in `sourcerom/` | Game | Mapper | SHA-1 (whole `.nes` file) |
-|---|---|---|---|
-| `nova.nes` | Nova | 1 (MMC1) | `b6b07ee76492ed475f39167c89b342353f999231` |
-
-Check yours with `shasum -a 1 sourcerom/*.nes`.
+- **Not distributed:** Bubble Bobble, Contra, Double Dragon II, and Super
+  Mario Bros. appear in screenshots, but their ROM images are not included.
+- **Unverified:** Games and ROM revisions not listed as supported above.
+- **Unsupported:** Games that require unsupported mappers or mapper modes.
 
 ## Supported NES mappers
 
@@ -194,78 +249,6 @@ nes2msxtr/
   testrom/        original test ROMs (NROM, UxROM, MMC3)
   docs/           technical notes and screenshots
 ```
-
-## Quick start
-
-Choose either route to convert and play a NES ROM on MSX turboR with a GFX9000
-(V9990), using openMSX or real hardware. Both routes use the same project,
-dependencies, and ROM folder.
-
-Install dependencies once: `make deps`, or `tools\deps.cmd` on Windows. See
-[Installing dependencies](#installing-dependencies).
-
-### Command line (power users)
-
-1. Copy your ROM into `sourcerom/`, for example `sourcerom/mygame.nes`.
-2. Build it:
-   ```sh
-   make ROM=mygame
-   ```
-   This writes `build/mygame/mygame.rom` and `build/mygame/report.txt`. The
-   report lists the mapper, RAM needed, code banks and translation warnings.
-3. Play it in openMSX:
-   ```sh
-   make run ROM=mygame
-   ```
-
-`ROM` can be a name in `sourcerom/` (with or without `.nes`) or any path.
-Some jump targets are found only while the game runs. If the game stops on one
-(red backdrop), `make run` adds it to
-`build/<game>/entries.<ROM-SHA1>.txt`; rebuild and play again. `make discover`
-finds targets automatically by playing the game headless (see the sample
-below).
-
-### Desktop app
-
-1. Launch the app with `dotnet run --project app/Nes2MsxTr.App`, or use an
-   [installer](app/README.md).
-2. In **SETTINGS**, select the project folder and check that dependencies are
-   installed. Put your ROM in the configured ROMs folder (default:
-   `sourcerom/`).
-3. Select the ROM and click **Convert**. When conversion finishes, click its
-   **Play** button to run it in openMSX with the GFX9000.
-
-To play on real MSX turboR hardware, copy the generated cartridge from
-`published/` to the machine and run it with a GFX9000 attached.
-
-A jump to an address the tracer never saw is handled by a small 6502
-interpreter (`runtime/interp.asm`, one extra code bank). It runs the original
-bytes until execution reaches translated code again. This is slow, so the path
-still benefits from an entry target; `make discover` builds with `--no-interp`
-to make unknown jumps visible as stops. `--no-interp` saves one 32K bank of
-mapper RAM.
-
-## Sample game
-
-Put your own dump in `sourcerom/` as `nova.nes`, then build it (below). The jump targets found so far by playing are copied into the
-ROM-signature-specific entries file in `build/<game>/` the first time the
-sample is built. The entries file is `samples/entries.<ROM-SHA1>.txt`; see
-[`samples/README.md`](samples/README.md). Make keeps the output folder named
-after the ROM file.
-
-### Nova
-
-`sourcerom/nova.nes`, Nova. MMC1, 256K PRG, CHR RAM, 32K PRG RAM. Needs 720K
-of RAM (a RAM expansion).
-
-```
-make ROM=nova
-make run ROM=nova
-make discover ROM=nova
-```
-
-The jump targets found so far are in
-`samples/entries.b6b07ee76492ed475f39167c89b342353f999231.txt`.
 
 ## Controls
 
