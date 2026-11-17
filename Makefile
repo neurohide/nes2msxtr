@@ -19,8 +19,8 @@
 #                                    40 s first, for games with an intro and menus)
 #   make test                        end-to-end check with the bundled test ROM
 #   make deps                        install the tools needed (tools/deps.sh)
-#   make itch VERSION=1.2            zip the tool (no ROMs) into dist/ for itch.io
-#   make installer VERSION=1.2       macOS .dmg into dist/ (Windows: installer/windows.ps1)
+#   make itch VERSION=1.3            zip the tool (no ROMs) into dist/ for itch.io
+#   make installer VERSION=1.3       macOS .dmg into dist/ (Windows: installer/windows.ps1)
 #   make icon                        regenerate the app icons from assets/
 
 ROM ?= testrom/testrom.nes
@@ -141,7 +141,7 @@ itch:
 	python3 tools/package_tool.py $(VERSION)
 
 # macOS disk image (RID=osx-x64 for Intel); the Windows setup is installer/windows.ps1
-VERSION ?= 1.2
+VERSION ?= 1.3
 RID ?= osx-arm64
 installer:
 	installer/macos.sh $(VERSION) $(RID)

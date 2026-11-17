@@ -2,7 +2,7 @@
 # and builds dist\nes2msxtr-<version>-win-x64-setup.exe with Inno Setup 6.
 # Needs the .NET 8 SDK, Python 3 and Inno Setup (winget install JRSoftware.InnoSetup).
 # usage: powershell -ExecutionPolicy Bypass -File installer\windows.ps1 [version]
-param([string]$Version = "1.2")
+param([string]$Version = "1.3")
 $ErrorActionPreference = "Stop"
 Set-Location (Join-Path $PSScriptRoot "..")
 $stage = "dist\win-x64"

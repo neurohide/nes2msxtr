@@ -5,7 +5,7 @@
 # writes dist/nes2msxtr-<version>-<rid>.dmg
 set -e
 cd "$(dirname "$0")/.."
-VERSION=${1:-1.2}
+VERSION=${1:-1.3}
 RID=${2:-osx-arm64}
 STAGE=dist/mac-$RID
 APP=$STAGE/nes2msxtr.app

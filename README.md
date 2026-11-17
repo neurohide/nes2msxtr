@@ -90,9 +90,35 @@ mapper RAM.
 
 ### Tested and supported ROMs
 
-| Game | ROM image | Status |
-|---|---|---|
-| Banana Dash Demo | `sourcerom/bananadashdemo.nes` | Included and tested |
+Hashes below are SHA-1 checksums of the complete `.nes` ROM images. Each
+tested image has matching jump-target entries in [`samples/`](samples/).
+
+| Game | SHA-1 (whole ROM) |
+|---|---|
+| Banana Dash Demo | `581be5540c4765a6275f44c8d791eedd26563f9e` |
+| Bubble Bobble | `b220cb06a7e23c55a982fd75b32554d0bf511b7b` |
+| Castlevania | `4e3ef47de86a941c37359bb3acfa5542a0fa7876` |
+| Contra | `c9ea66bb7cb30ad5343f1721b1d4d3219859319b` |
+| Donkey Kong Jr. | `25351a86888fb964f0ba57294e6ce64fa63b227c` |
+| Double Dragon II | `457bf2438e11aa86947e5911c24f7075a9eceaeb` |
+| DuckTales | `e2004d265e44e851f3c6053314af62a05fc4a595` |
+| Excitebike | `8e807f8aa465891affc51939687009b36943aade` |
+| Felix the Cat | `37fa1b70e63eca4f81681ffa7538e381d41020e4` |
+| Guardian Legend | `9b763c36f0fcfb983083ca7b2fad4550dacd8dcb` |
+| Gun.Smoke | `57daceeb93cb53c27661a02d8f8e8345b708b632` |
+| Jackal | `c0067eb00e9f1f82561e9a96a5c2b7e22cee806c` |
+| Kung Fu | `b36ece8fc8330c36716a7eb19874c31fc5f14287` |
+| Maniac Mansion | `a421c563742f5f33bcf922b065ad5ed3d969977a` |
+| Mega Man 2 | `54d53b46b961ba8b80ef57309bb0d78995d740a2` |
+| Ninja Gaiden III | `6958358c4a554bdc6d4f8571f83829989d0bb018` |
+| Pro Wrestling | `ac1a0ec1ae03355aa871657f309878bdb010b097` |
+| Rampage | `f4bcdb31b2280469b4761067d4a30c0ddbb031f0` |
+| Super Contra | `92fbbb836cc34ce16b80641b78d3a1254561cc48` |
+| Super Mario Bros. 2 | `0dde824764daba70217e6167d01f202fb1666cb0` |
+| Super Mario Bros. 3 | `a25d2dcbf6ec3634a84318bfe2cfe28d5331d815` |
+| Toki | `8b37754e3a6cb732269fc8fb7151ec9b16153f4c` |
+| Wacky Races | `b784f3f000574172ea78ed0ca5bcf18490cd7e3b` |
+| Zombie Nation | `ea63840b39029b57e249be2a83624d0b9dc94ea7` |
 
 ### Not distributed or not yet verified
 
@@ -213,19 +239,19 @@ is made from `assets/0-nes-to-msx-turbor.png` by `make icon`.
 
 - **macOS**: build the disk image with
   ```
-  make installer VERSION=1.2             # Apple silicon
-  make installer VERSION=1.2 RID=osx-x64 # Intel
+  make installer VERSION=1.3             # Apple silicon
+  make installer VERSION=1.3 RID=osx-x64 # Intel
   ```
-  It writes `dist/nes2msxtr-1.2-osx-arm64.dmg`. Open it and drag
+  It writes `dist/nes2msxtr-1.3-osx-arm64.dmg`. Open it and drag
   `nes2msxtr.app` to Applications. The first start copies the project to
   `~/nes2msxtr`, where your ROMs (`sourcerom/`) and the builds go. The app is
   not notarized: the first time, open it with right-click, **Open**.
 - **Windows**: on Windows, with the .NET 8 SDK, Python 3 and Inno Setup 6
   (`winget install JRSoftware.InnoSetup`), run
   ```
-  powershell -ExecutionPolicy Bypass -File installer\windows.ps1 1.2
+  powershell -ExecutionPolicy Bypass -File installer\windows.ps1 1.3
   ```
-  It writes `dist\nes2msxtr-1.2-win-x64-setup.exe`. The setup installs for
+  It writes `dist\nes2msxtr-1.3-win-x64-setup.exe`. The setup installs for
   the current user, without admin rights, into
   `%LOCALAPPDATA%\Programs\nes2msxtr`, adds a Start menu entry (a desktop
   shortcut is optional) and an uninstaller. Put your ROMs in its `sourcerom\`
@@ -271,7 +297,7 @@ make test                 # translate the test ROMs and compare their RAM with
                           # a reference 6502 run, in openMSX
 make clean                # remove build/ (entries.txt included)
 make deps                 # install the build tools and openMSX (tools/deps.sh)
-make itch VERSION=1.2     # zip the tool (no ROMs) into dist/ for itch.io
+make itch VERSION=1.3     # zip the tool (no ROMs) into dist/ for itch.io
 ```
 
 Windows install, generating a ROM, the NROM happy path, and the

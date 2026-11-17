@@ -4,7 +4,7 @@
 ; (build\, published\, sourcerom\ are created there).
 
 #ifndef Version
-  #define Version "1.2"
+  #define Version "1.3"
 #endif
 
 [Setup]

@@ -100,16 +100,16 @@ The icon is made from `assets/0-nes-to-msx-turbor.png` (the artwork left of
 the NOTICE panel, without the text above and below it) by `make icon` (`tools/make_icon.py`); it writes
 `Assets/icon.png`, `installer/icon.ico` and `installer/icon.icns`.
 
-- **macOS**: `make installer VERSION=1.2` (add `RID=osx-x64` for Intel) writes
-  `dist/nes2msxtr-1.2-osx-arm64.dmg`: drag `nes2msxtr.app` to Applications.
+- **macOS**: `make installer VERSION=1.3` (add `RID=osx-x64` for Intel) writes
+  `dist/nes2msxtr-1.3-osx-arm64.dmg`: drag `nes2msxtr.app` to Applications.
   The project ships inside the app; the first start copies it to
   `~/nes2msxtr`, where the ROMs and the builds go. The app is signed ad hoc
   only, so the first time open it with right-click, Open.
 - **Windows** (on Windows, with the .NET 8 SDK, Python 3 and Inno Setup 6:
   `winget install JRSoftware.InnoSetup`):
 
-      powershell -ExecutionPolicy Bypass -File installer\windows.ps1 1.2
+      powershell -ExecutionPolicy Bypass -File installer\windows.ps1 1.3
 
-  writes `dist\nes2msxtr-1.2-win-x64-setup.exe`. It installs for the current
+  writes `dist\nes2msxtr-1.3-win-x64-setup.exe`. It installs for the current
   user, without admin rights, into `%LOCALAPPDATA%\Programs\nes2msxtr`, with
   a Start menu entry (and optionally a desktop one) and an uninstaller.
