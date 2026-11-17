@@ -10,6 +10,25 @@ proc nes2msx_show_v9990 {} {
 }
 after time 1 nes2msx_show_v9990
 
+# The UI's film button sets NES2MSX_VIDEO; record the GFX9000 output once ready.
+proc nes2msx_start_video_recording {} {
+    global env
+    if {![info exists env(NES2MSX_VIDEO)] || $env(NES2MSX_VIDEO) ne "1"} return
+    if {[catch {set ::videosource GFX9000}]} {
+        after time 0.5 nes2msx_start_video_recording
+        return
+    }
+    set n 1
+    while {[file exists "$env(NES2MSX_OUT)/video-$n.avi"]} { incr n }
+    set base "$env(NES2MSX_OUT)/video-$n"
+    if {[catch {record start -doublesize $base} err]} {
+        message "nes2msxtr: could not start video recording: $err"
+        return
+    }
+    message "nes2msxtr: recording to [file tail $base].avi; close openMSX to finish"
+}
+after time 1 nes2msx_start_video_recording
+
 proc nes2msx_hex {addr len} {
     set s ""
     if {$addr + $len > 0x10000} { set len [expr {0x10000 - $addr}] }

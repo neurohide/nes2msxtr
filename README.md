@@ -1,3 +1,5 @@
+[Buy me a coffee](https://buymeacoffee.com/neurohide)
+
 # nes2msxtr
 
 **nes2msxtr** statically recompiles NES games into **MSX turboR** cartridges

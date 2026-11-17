@@ -1699,7 +1699,7 @@ endif
         ld a, (split_on)
         or a
         jp z, pa_nosplit
-        call cur_to_reg         ; below the split: current X, top's Y
+        call cur_to_reg         ; below the split: current scroll after the hit
         call calc_scroll
         ld hl, vregs
         ld de, bot_regs
@@ -1712,10 +1712,6 @@ endif
         ld a, (top_ctrl)
         ld (reg_ctrl), a
         call calc_scroll
-        ld a, (vregs)
-        ld (bot_regs), a
-        ld a, (vregs + 1)
-        ld (bot_regs + 1), a
         ld a, (mir_v)           ; horizontal mirroring: and the top's map half
         or a
         jr nz, pa_half
@@ -1742,8 +1738,8 @@ pa_t0:  ld de, s0row
         sub CROP                ; after the hit
         jr c, pa_allbot
         jr z, pa_allbot
-        ; A mid-frame Y-scroll write makes the next line show image line
-        ; SCAY, so continue the picture: bottom Y = top Y + split line.
+        ; The NES scroll written after sprite 0 controls the lower section;
+        ; account for the split line because V9990 scroll is top-of-frame.
         push af
         ld hl, (bot_regs)
         ld e, a

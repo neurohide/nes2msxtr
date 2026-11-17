@@ -21,6 +21,8 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        var version = GetType().Assembly.GetName().Version;
+        VersionText.Text = version is null ? "" : $"v{version.Major}.{version.Minor}";
         DepList.ItemsSource = _deps.All.ToList();
         RomList.ItemsSource = _shown;
         _flush.Tick += (_, _) => FlushLog();
@@ -64,6 +66,7 @@ public partial class MainWindow : Window
         RomList.AddHandler(Button.ClickEvent, (_, e) =>
         {
             if (e.Source is Button { Tag: "play", DataContext: RomItem r }) Play(r);
+            if (e.Source is Button { Tag: "record", DataContext: RomItem recordedRom }) RecordVideo(recordedRom);
         });
         ClearBtn.Click += (_, _) => { lock (_logLock) { _log.Clear(); _logDirty = true; } };
         CancelBtn.Click += (_, _) => _cts?.Cancel();
@@ -287,15 +290,20 @@ public partial class MainWindow : Window
     }
 
     // make run: builds if needed, plays in openMSX with crash recording (build/<game>/crash-*)
-    void Play(RomItem r)
+    void Play(RomItem r) => Launch(r, recordVideo: false);
+
+    void RecordVideo(RomItem r) => Launch(r, recordVideo: true);
+
+    void Launch(RomItem r, bool recordVideo)
     {
         if (Root is not { } root) { Log("project folder not found"); return; }
         try
         {
             var psi = new System.Diagnostics.ProcessStartInfo("make") { WorkingDirectory = root, UseShellExecute = false };
             foreach (var a in new[] { "run", $"ROM={r.Path}", $"OPENMSX={_deps.OpenMsxPath}" }) psi.ArgumentList.Add(a);
+            if (recordVideo) psi.Environment["NES2MSX_VIDEO"] = "1";
             System.Diagnostics.Process.Start(psi);
-            Log($"make run ROM={r.Name}");
+            Log($"make run ROM={r.Name}{(recordVideo ? " (recording video to build/" + r.Name + ")" : "")}");
         }
         catch (Exception ex) { Log($"cannot start make: {ex.Message}"); }
     }

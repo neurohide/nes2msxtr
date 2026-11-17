@@ -22,10 +22,16 @@
         </DrawingBrush.Drawing>
       </DrawingBrush>
     </Border.Background>
+    <Grid>
     <Border Background="#000000" BorderBrush="#FCFCFC" BorderThickness="3" HorizontalAlignment="Left"
             VerticalAlignment="Center" Margin="16,0" Padding="12,6">
       <TextBlock Text="NES &gt; MSX TURBOR (VDP9990)" FontSize="14" Foreground="#FCD8A8"/>
     </Border>
+    <Border Background="#000000" BorderBrush="#FCFCFC" BorderThickness="2" HorizontalAlignment="Right"
+            VerticalAlignment="Center" Margin="0,0,16,0" Padding="8,4">
+      <TextBlock Name="VersionText" FontSize="12" Foreground="#FCD8A8"/>
+    </Border>
+    </Grid>
   </Border>
 
   <Grid Name="BodyGrid" Grid.Row="1" Margin="12">
@@ -64,12 +70,17 @@
         <TextBox Grid.Row="2" Grid.Column="1" Name="DestBox"/>
         <Button Grid.Row="2" Grid.Column="2" Name="DestBtn" Content="Browse…"/>
       </Grid>
-        <DockPanel Name="DepsPane" IsVisible="False">
-          <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6" VerticalAlignment="Top" Margin="6,0,0,0">
+        <Grid Name="DepsPane" IsVisible="False" RowDefinitions="Auto,*" RowSpacing="10">
+          <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right" Margin="6,0,0,0">
             <Button Name="CheckBtn" Content="Recheck"/>
             <Button Name="InstallBtn" Content="Install missing"/>
           </StackPanel>
-          <ItemsControl Name="DepList">
+          <ItemsControl Grid.Row="1" Name="DepList">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <StackPanel Spacing="10"/>
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
             <ItemsControl.ItemTemplate>
               <DataTemplate>
                 <Grid ColumnDefinitions="32,Auto,*" ColumnSpacing="6">
@@ -80,7 +91,7 @@
               </DataTemplate>
             </ItemsControl.ItemTemplate>
           </ItemsControl>
-        </DockPanel>
+        </Grid>
       </Panel>
       </DockPanel>
       </Border>
@@ -129,6 +140,11 @@
                             BorderThickness="0" FontSize="14" Padding="4,0" MinHeight="0" MinWidth="0"
                             VerticalAlignment="Center" ToolTip.Tip="Play in openMSX">
                       <TextBlock Text="&#x25B6;" Foreground="#3DDC57"/>
+                    </Button>
+                    <Button Tag="record" IsVisible="{Binding Published}" Background="Transparent"
+                            BorderThickness="0" FontSize="14" Padding="4,0" MinHeight="0" MinWidth="0"
+                            VerticalAlignment="Center" ToolTip.Tip="Record video in openMSX">
+                      <Ellipse Width="12" Height="12" Fill="#FF3030"/>
                     </Button>
                   </StackPanel>
                   <TextBlock FontSize="11" Foreground="#9C9CD0" FontFamily="Menlo,Consolas,monospace">
@@ -226,6 +242,8 @@
     <local:Pipe HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="32,0,0,24" Height="48"/>
     <local:Pipe HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="120,0,0,24" Height="32"/>
     <local:Pipe HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,40,24" Height="40"/>
+    <TextBlock Text="2026 neurohide" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+               Margin="0,0,8,5" FontSize="10" Foreground="#FCD8A8" Background="#000000" Padding="4,2"/>
   </Grid>
   </Grid>
 </Window>
