@@ -21,13 +21,18 @@ emulates the NES picture, sound and mapper on the MSX hardware.
 >
 > Only use it on game images you own and have the right to convert.
 
-| Nova |
-|---|
-| ![Nova on MSX turboR + GFX9000](docs/screenshots/nova.png) |
+### Screenshots
 
-*This screenshot is a sample that shows the result of the translation: the
-cartridge nes2msxtr built from the ROM listed below, running in openMSX on
-a Panasonic FS-A1GT (R800) with a GFX9000.*
+| Banana Dash Demo | Bubble Bobble | Contra |
+|---|---|---|
+| ![Banana Dash Demo running on MSX turboR](docs/screenshots/bananadashdemo.png) | ![Bubble Bobble running on MSX turboR](docs/screenshots/bubblebobble.png) | ![Contra running on MSX turboR](docs/screenshots/contra.png) |
+
+| Double Dragon II | Super Mario Bros. | Nova |
+|---|---|---|
+| ![Double Dragon II running on MSX turboR](docs/screenshots/doubledragonii.png) | ![Super Mario Bros. running on MSX turboR](docs/screenshots/supermariobros.png) | ![Nova running on MSX turboR](docs/screenshots/nova.png) |
+
+*Screenshots show sample builds running in openMSX on a Panasonic FS-A1GT
+(R800) with a GFX9000. The sample Nova build uses the ROM listed below.*
 
 ### ROMs tested
 
@@ -192,32 +197,53 @@ nes2msxtr/
 
 ## Quick start
 
-1. Install the dependencies (once): `make deps`, or `tools\deps.cmd` on
-   Windows. See [Installing dependencies](#installing-dependencies).
-2. Copy your ROM into `sourcerom/`, for example `sourcerom/mygame.nes`.
-3. Build it:
-   ```
+Choose either route to convert and play a NES ROM on MSX turboR with a GFX9000
+(V9990), using openMSX or real hardware. Both routes use the same project,
+dependencies, and ROM folder.
+
+Install dependencies once: `make deps`, or `tools\deps.cmd` on Windows. See
+[Installing dependencies](#installing-dependencies).
+
+### Command line (power users)
+
+1. Copy your ROM into `sourcerom/`, for example `sourcerom/mygame.nes`.
+2. Build it:
+   ```sh
    make ROM=mygame
    ```
    This writes `build/mygame/mygame.rom` and `build/mygame/report.txt`. The
    report lists the mapper, RAM needed, code banks and translation warnings.
-4. Play it in openMSX:
-   ```
+3. Play it in openMSX:
+   ```sh
    make run ROM=mygame
    ```
 
 `ROM` can be a name in `sourcerom/` (with or without `.nes`) or any path.
-Some jump targets can only be found while the game runs. When the game stops
-on one (red backdrop), `make run` adds it to `build/<game>/entries.<ROM-SHA1>.txt`;
-rebuild and play on. `make discover` finds them headless by playing the game
-automatically (see the sample below).
+Some jump targets are found only while the game runs. If the game stops on one
+(red backdrop), `make run` adds it to
+`build/<game>/entries.<ROM-SHA1>.txt`; rebuild and play again. `make discover`
+finds targets automatically by playing the game headless (see the sample
+below).
 
-A jump to an address the tracer never saw does not stop the game: the cartridge
-carries a small 6502 interpreter (`runtime/interp.asm`, one extra code bank)
-that runs the original bytes there until the flow reaches translated code
-again. It is slow, so such a path still wants an entry; `make discover` builds
-with `--no-interp` so these jumps stay visible as stops. `--no-interp` drops
-the bank from a build (32K less mapper RAM).
+### Desktop app
+
+1. Launch the app with `dotnet run --project app/Nes2MsxTr.App`, or use an
+   [installer](app/README.md).
+2. In **SETTINGS**, select the project folder and check that dependencies are
+   installed. Put your ROM in the configured ROMs folder (default:
+   `sourcerom/`).
+3. Select the ROM and click **Convert**. When conversion finishes, click its
+   **Play** button to run it in openMSX with the GFX9000.
+
+To play on real MSX turboR hardware, copy the generated cartridge from
+`published/` to the machine and run it with a GFX9000 attached.
+
+A jump to an address the tracer never saw is handled by a small 6502
+interpreter (`runtime/interp.asm`, one extra code bank). It runs the original
+bytes until execution reaches translated code again. This is slow, so the path
+still benefits from an entry target; `make discover` builds with `--no-interp`
+to make unknown jumps visible as stops. `--no-interp` saves one 32K bank of
+mapper RAM.
 
 ## Sample game
 
@@ -307,4 +333,4 @@ Contributions are welcome!
 
 If the project is useful to you, consider supporting development:
 
-[![Buy Me a Coffee](https://img.shields.io/badge/BUY%20ME%20A%20COFFEE-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/neurohide)
+[Buy Me a Coffee](https://buymeacoffee.com/neurohide)
