@@ -342,4 +342,4 @@ Contributions are welcome!
 
 If the project is useful to you, consider supporting development:
 
-[Buy Me a Coffee](https://buymeacoffee.com/neurohide)
+[![Buy Me a Coffee](assets/buymeacoffee.svg)](https://buymeacoffee.com/neurohide)
