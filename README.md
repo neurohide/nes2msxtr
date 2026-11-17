@@ -1,5 +1,3 @@
-[![Buy Me a Coffee](https://img.buymeacoffee.com/button-api/?text=Buy%20me%20a%20coffee&emoji=&slug=neurohide&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff)](https://buymeacoffee.com/neurohide)
-
 # nes2msxtr
 
 **nes2msxtr** statically recompiles NES games into **MSX turboR** cartridges
@@ -292,3 +290,21 @@ copyright holders. Don't distribute converted cartridges.
 
 See the disclaimer at the top of this file. NES is a trademark of Nintendo;
 MSX is a trademark of MSX Licensing Corporation.
+
+---
+
+## Contributing
+
+Contributions are welcome!
+
+- ⭐ **Star** this repo to help others discover it
+- 🐛 **Report bugs** via [Issues](https://github.com/neurohide/nes2msxtr/issues)
+- 💡 **Suggest features** via [Issues](https://github.com/neurohide/nes2msxtr/issues)
+
+---
+
+## Support
+
+If the project is useful to you, consider supporting development:
+
+[![Buy Me a Coffee](https://img.buymeacoffee.com/button-api/?text=Buy%20me%20a%20coffee&emoji=&slug=neurohide&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff)](https://buymeacoffee.com/neurohide)
